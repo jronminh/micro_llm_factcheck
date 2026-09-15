@@ -1,10 +1,9 @@
 """So sánh performance giữa các bản model (1.5B vs 0.5B) trên cùng bộ câu hỏi.
 
-Chạy tuần tự (không đồng thời) để tránh 2 model cùng chiếm RAM: dừng
-server hiện tại, đổi MODEL_PATH, khởi động lại, chạy hết bộ câu hỏi, rồi
-mới chuyển model kế tiếp.
+Chạy tuần tự (không đồng thời) để tránh 2 model cùng chiếm RAM: đổi
+MODEL_PATH rồi gọi ensure_server() - nó tự phát hiện server đang chạy
+model khác và khởi động lại đúng model trước khi chạy hết bộ câu hỏi.
 """
-import subprocess
 import time
 from pathlib import Path
 
@@ -23,15 +22,7 @@ QUESTIONS = [
 ]
 
 
-def stop_server() -> None:
-    # -x (khớp đúng tên process) thay vì -f: -f khớp cả cmdline của process
-    # gọi pkill, có thể tự kill nhầm shell đang chạy nó.
-    subprocess.run(["pkill", "-x", "llama-server"], check=False)
-    time.sleep(1)
-
-
 def run_for_model(label: str, model_path: Path) -> list[dict]:
-    stop_server()
     pipeline.MODEL_PATH = model_path
     pipeline.ensure_server()
 

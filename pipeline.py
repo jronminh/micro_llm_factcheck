@@ -47,9 +47,30 @@ def _server_ready() -> bool:
         return False
 
 
+def _loaded_model_path() -> str | None:
+    try:
+        data = requests.get(f"{SERVER_URL}/v1/models", timeout=2).json()
+        return data["data"][0]["id"]
+    except (requests.RequestException, KeyError, IndexError):
+        return None
+
+
+def _stop_server() -> None:
+    # -x (khớp đúng tên process) thay vì -f: -f khớp cả cmdline của process
+    # gọi pkill, có thể tự kill nhầm shell đang chạy nó.
+    subprocess.run(["pkill", "-x", "llama-server"], check=False)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and _server_ready():
+        time.sleep(0.3)
+
+
 def ensure_server(startup_timeout: float = 60) -> None:
     if _server_ready():
-        return
+        # Server đang chạy có thể là của một lần gọi trước với model khác -
+        # phải kiểm tra khớp MODEL_PATH, không thì âm thầm benchmark nhầm model.
+        if _loaded_model_path() == str(MODEL_PATH):
+            return
+        _stop_server()
 
     log = SERVER_LOG.open("w")
     subprocess.Popen(

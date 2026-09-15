@@ -5,6 +5,7 @@ hoạt động như một công cụ search hơn là một model đang suy luậ
 from pathlib import Path
 
 import pipeline
+from score import score_answer
 
 pipeline.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
 
@@ -20,11 +21,23 @@ QUESTIONS = [
 ]
 
 if __name__ == "__main__":
+    # "refusal" chỉ đúng cho câu hỏi ngoài phạm vi (mục cuối) - không cộng
+    # chung với "meaningful" vì refusal ở câu hỏi có-thể-trả-lời là lỗi.
+    tally = {}
     for mode in ("synth", "extract"):
         print(f"\n{'=' * 10} mode={mode} {'=' * 10}")
+        counts = {}
         for kind, q in QUESTIONS:
             out = pipeline.answer_question(q, mode=mode)
+            verdict = score_answer(q, out["answer"], out["snippets"])["verdict"]
+            counts[verdict] = counts.get(verdict, 0) + 1
             print(f"[{kind}] {q}")
             print(f"  -> {out['answer']}")
-            print(f"  gen_tps={out['gen_tps']:.1f}")
+            print(f"  verdict={verdict}  gen_tps={out['gen_tps']:.1f}")
             print()
+        tally[mode] = counts
+
+    print(f"\n{'=' * 10} tổng kết {'=' * 10}")
+    for mode, counts in tally.items():
+        breakdown = ", ".join(f"{v}={n}" for v, n in sorted(counts.items()))
+        print(f"{mode}: {breakdown}")
