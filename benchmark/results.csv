@@ -1,0 +1,4 @@
+timestamp,question,search_s,model_s,total_s,prompt_tps,gen_tps,n_snippets,answer_preview
+2026-09-15T12:11:09+00:00,Dan so Viet Nam nam 2026 la bao nhieu?,1.12,28.27,29.39,25.978983834456834,8.7306912404046,5,"Dân số Việt Nam năm 2026 được dự báo sẽ đạt khoảng 102.457.889 người vào đầu năm 2027, theo đoạn trích [1]."
+2026-09-15T12:11:58+00:00,Ai la tong thong My hien tai?,0.86,18.8,19.66,26.257088058110813,8.907639920802984,5,Tổng thống Mỹ hiện tại là Donald Trump.
+2026-09-15T12:12:52+00:00,Gia vang hom nay la bao nhieu?,0.86,53.16,54.02,19.457927818023297,0.5003860478359055,5,1 Chỉ Vàng Bao Nhiêu Tiền Hôm Nay
