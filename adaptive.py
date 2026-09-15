@@ -77,8 +77,28 @@ def _cluster(texts: list[str], sim_threshold: float) -> list[list[int]]:
     return clusters
 
 
+def _content_bias(snippets: list[dict], content_sim_threshold: float) -> float | None:
+    """Bias theo NỘI DUNG snippet gốc, không phải domain - bắt được trường hợp
+    nhiều domain khác nhau nhưng cùng chép/diễn giải một nguồn gốc (bias theo
+    domain không thấy được, xem README case "thủ đô nước láng giềng phía bắc
+    VN": 10 domain khác nhau nhưng cùng paraphrase 1 bài SGK).
+
+    Tái dùng _cluster() như với answers, nhưng input là title+snippet gốc.
+    Trả về tỉ lệ cụm nội dung lớn nhất / tổng số snippet trong cụm thắng -
+    cùng thang đo với bias theo domain (0 = mọi snippet khác nhau thật, gần 1
+    = phần lớn snippet trong cụm thắng là bản chép/diễn giải của nhau).
+    """
+    if len(snippets) <= 1:
+        return 0.0
+    texts = [f"{s.get('title', '')} {s.get('snippet', '')}".strip() for s in snippets]
+    clusters = _cluster(texts, content_sim_threshold)
+    largest = max(len(c) for c in clusters)
+    return round(largest / len(texts), 2)
+
+
 def _best_cluster_result(
-    question: str, answers: list[tuple[str, str]], snippets: list[dict], cluster_sim_threshold: float,
+    question: str, answers: list[tuple[str, str]], snippets: list[dict],
+    cluster_sim_threshold: float, content_sim_threshold: float,
 ) -> dict | None:
     # Mẫu degenerate ("[2]", rỗng...) không tham gia cluster - nếu không,
     # nhiều lần degenerate giống hệt nhau có thể thắng đồng thuận dù không có
@@ -100,9 +120,13 @@ def _best_cluster_result(
     domains = [urlparse(usable[i][2].get("url") or "").hostname for i in top]
     domains = [d for d in domains if d]
     bias = round(1 - len(set(domains)) / len(domains), 2) if domains else None
+    content_bias = _content_bias([usable[i][2] for i in top], content_sim_threshold)
     # Chia theo tổng số link đã thử (kể cả degenerate), để link hỏng vẫn kéo
     # đồng thuận xuống thay vì bị coi như chưa từng xảy ra.
-    return {"answer": representative, "agreement": len(top) / len(answers), "cluster_size": len(top), "bias": bias}
+    return {
+        "answer": representative, "agreement": len(top) / len(answers), "cluster_size": len(top),
+        "bias": bias, "content_bias": content_bias,
+    }
 
 
 def _process_link(
@@ -133,6 +157,7 @@ def answer_question_per_link(
     max_n: int = 8,
     consensus_threshold: float = 0.75,
     cluster_sim_threshold: float = 0.7,
+    content_sim_threshold: float = 0.5,
     min_votes: int = 4,
     temperature: float = 0.0,
     n_predict: int = 80,
@@ -206,11 +231,12 @@ def answer_question_per_link(
 
         if len(answers) < min_votes:
             continue
-        best = _best_cluster_result(question, answers, used_snippets, cluster_sim_threshold)
+        best = _best_cluster_result(question, answers, used_snippets, cluster_sim_threshold, content_sim_threshold)
         if debug and best:
             print(
                 f"[debug]   đồng thuận: {best['agreement']:.2f} (ngưỡng {consensus_threshold}) "
-                f"coverage={best['cluster_size'] / n_attempted:.2f} bias={best['bias']}",
+                f"coverage={best['cluster_size'] / n_attempted:.2f} bias={best['bias']} "
+                f"content_bias={best['content_bias']}",
                 flush=True,
             )
         if best and best["agreement"] >= consensus_threshold:
@@ -221,11 +247,12 @@ def answer_question_per_link(
                 "verdict": score_answer(question, best["answer"], used_snippets)["verdict"],
                 "n_links_used": len(answers), "agreement": round(best["agreement"], 2),
                 "coverage": round(best["cluster_size"] / n_attempted, 2), "bias": best["bias"],
+                "content_bias": best["content_bias"],
                 "confident": True, "snippets": used_snippets,
             }
 
     # Hết link hoặc hết giờ mà chưa đạt ngưỡng - trả cụm lớn nhất đã có.
-    best = _best_cluster_result(question, answers, used_snippets, cluster_sim_threshold)
+    best = _best_cluster_result(question, answers, used_snippets, cluster_sim_threshold, content_sim_threshold)
     if debug:
         print(
             f"[debug] hết link/timeout sau {len(answers)} link, "
@@ -239,6 +266,7 @@ def answer_question_per_link(
         "verdict": score_answer(question, best["answer"], used_snippets)["verdict"],
         "n_links_used": len(answers), "agreement": round(best["agreement"], 2),
         "coverage": round(best["cluster_size"] / n_attempted, 2), "bias": best["bias"],
+        "content_bias": best["content_bias"],
         "confident": False, "snippets": used_snippets,
     }
 
@@ -261,6 +289,6 @@ if __name__ == "__main__":
     print(
         f"verdict={out['verdict']} confident={out.get('confident')} "
         f"n_links_used={out.get('n_links_used')} agreement={out.get('agreement')} "
-        f"coverage={out.get('coverage')} bias={out.get('bias')} "
+        f"coverage={out.get('coverage')} bias={out.get('bias')} content_bias={out.get('content_bias')} "
         f"elapsed={elapsed:.1f}s"
     )

@@ -278,6 +278,26 @@ một sách giáo khoa) - đây chính là dạng tương quan đã gây ra case
 mà agreement cao ở lần test trước. Muốn bắt được dạng này cần so khớp nội
 dung snippet gốc (không chỉ domain), chưa làm.
 
+### Thêm content_bias: so khớp nội dung snippet gốc, không chỉ domain
+
+Tái dùng `_cluster()` (đang dùng để gom câu trả lời giống nhau) cho
+title+snippet gốc của các nguồn trong cụm thắng - `content_bias` = tỉ lệ
+cụm nội dung lớn nhất / cỡ cụm thắng, cùng thang đo với `bias` (0 = mọi
+snippet khác nhau thật, gần 1 = phần lớn là bản chép/diễn giải của nhau).
+
+Test lại case multi-hop: `bias` (domain) = 0.0 (9 domain khác nhau), nhưng
+`content_bias` = **0.5** - bắt được đúng cái domain-bias bỏ lỡ: nhìn snippet
+thật, phần lớn đều mở đầu giống nhau kiểu "Bài 19: Các nước láng giềng của
+Việt Nam..." / "Giáo án Địa lí lớp 5...", tức cùng một giáo án gốc dù đăng
+trên domain khác nhau. Case NATO (nguồn thật độc lập): `content_bias` = 0.25,
+thấp hơn rõ ràng - phân biệt được 2 case tốt.
+
+Lưu ý quan trọng: content_bias **không suy ra đúng/sai** - test case dễ
+"Thủ đô Việt Nam là gì?" (câu trả lời đúng) vẫn ra `content_bias=0.4` vì
+nhiều nguồn diễn đạt giống nhau khi cùng nói một fact đơn giản, phổ biến.
+Đây chỉ là chỉ số phụ trợ đo độ độc lập của bằng chứng, không thay được
+việc phải nhìn cả agreement + bias + content_bias cùng nhau.
+
 ## Trạng thái
 
 Bản chạy được đầu tiên hoàn chỉnh: search + model (server warm) + benchmark
