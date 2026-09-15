@@ -345,9 +345,52 @@ pháp cố định.
 "hiểu"/"sinh" của model - quy tắc dựa tín hiệu hình thức có thật (từ nối, POS
 tag) không bao giờ tách sai (chỉ có thể bỏ sót), còn mọi mức độ để model tự
 suy luận/sinh chữ đều có tỷ lệ lỗi đáng kể, kể cả khi đã thu hẹp xuống "chỉ gắn
-nhãn". `decompose.py` **chưa được nối vào `adaptive.py`/pipeline chính** -
-mới dừng ở bước tách câu hỏi độc lập, chưa chạy search+chain thật cho từng
-câu hỏi con.
+nhãn".
+
+## Chain: search+extract theo từng câu hỏi con (chain.py)
+
+Nối `decompose.py` vào cơ chế đồng thuận per-link (`adaptive.py`) - `chain.py`
+(độc lập, chưa nối vào `pipeline.py` chính). Câu hỏi loại bridge (có `{X}`)
+thì chain tuần tự: search+extract câu hỏi con đầu, điền answer vào `{X}` của
+câu hỏi con sau, search+extract tiếp. Loại comparison thì chạy 2 câu hỏi con
+song song, không phụ thuộc nhau. **Chưa có bước tổng hợp câu trả lời cuối cho
+câu hỏi gốc** (vd rút gọn/tính toán từ answer thô) - đó là việc của "đầu ra",
+cố tình chưa làm ở giai đoạn này.
+
+Test đầu tiên (case "thủ đô nước láng giềng phía bắc VN") lộ ngay 1 bug: answer
+thô của bước 1 (đồng thuận thấp, dài dòng) vẫn bị nhét thẳng vào `{X}`, tạo
+query bước 2 vỡ vụn. Vá bằng 2 việc:
+
+1. **Cổng confidence trước khi chain**: chỉ điền `{X}` và chạy bước sau nếu
+   bước trước `confident=True` (đồng thuận đã đạt ngưỡng) - không tự bịa rule
+   mới, dùng thẳng tín hiệu `adaptive.py` đã có sẵn.
+2. **`adaptive_entity.py`** - fork riêng của `adaptive.py`, dùng prompt mới
+   `extract_entity` (pipeline.py) ép trả lời đúng 1 tên riêng thay vì 1
+   câu/cụm bất kỳ. Lý do fork: bridge entity luôn là tên ngắn (nước/thành
+   phố/người), còn `extract_unconditional` gốc để model tự do trích "câu/cụm
+   phù hợp" nên hay lan man nhắc lại tiêu đề snippet trước khi vào nội dung -
+   **đã thử chỉ cắt ngắn `n_predict` trước, không ăn thua** (chỉ cắt cụt thói
+   quen lan man giữa chừng, có lúc còn tạo "đồng thuận giả" khi nhiều link
+   cùng bị cắt cụt ở cùng 1 điểm do chung tiêu đề bài viết) - phải chặn từ
+   prompt. Kết quả: case "cà phê" agreement bước 1 tăng 0.12 → 0.75
+   (`confident=True`, ra đúng "Brazil"), tốc độ cũng nhanh hơn hẳn
+   (`n_predict=20` thay vì 80).
+
+Áp `adaptive_entity` luôn cho bước 2 khi khung ngoài cũng hỏi tên riêng (vd
+"Thủ đô của {X} là gì") - route bằng `_expects_number()` (regex/từ khóa
+"bao nhiêu"/"how much"/"how many"), giữ `adaptive.py` gốc khi khung ngoài hỏi
+số liệu (vd "Dân số của {X} là bao nhiêu"). Case cà phê→Brazil→Brasília chạy
+hết cả chain, bước 2 vẫn chưa đạt `confident=True` (0.38) nhưng agreement giờ
+phản ánh đúng bất đồng nội dung thật (1 nguồn nhầm "Rio de Janeiro" - hiểu lầm
+phổ biến có thật), không còn bị nhiễu do format câu trả lời khác nhau.
+
+Case "thủ đô nước láng giềng phía bắc VN" (chạy lại với `adaptive_entity`):
+đồng thuận về "Trung Quốc" tăng lên thành đa số (4/8, các link còn lại rải
+rác Cam-pu-chia/Thái Lan/Việt Nam/1 answer degenerate) nhưng vẫn dưới ngưỡng
+0.75 - hệ thống đúng đắn dừng lại, không chain tiếp. Đây là lần đầu
+`confident=False` phản ánh đúng bất đồng thật giữa nguồn (SEO/giáo án tiếng
+Việt vẫn lệch, xem phần Tune adaptive.py ở trên), không phải nhiễu do cách
+trích xuất.
 
 ## Trạng thái
 
@@ -356,7 +399,10 @@ ghi log. Đã test: 8 câu hỏi đa dạng lĩnh vực với 1.5B; so sánh t�
 vs 0.5B; tiếng Anh vs tiếng Việt; 8 dạng câu hỏi khác nhau ở 2 mode prompt
 (synth/extract) với 0.5B; tune `adaptive.py` (per-link consensus) với 8 câu
 hỏi khó hơn; khảo sát phân rã câu hỏi multi-hop trước khi search (4 cách,
-chốt ở quy tắc thuần regex+POS, xem mục trên).
+chốt ở quy tắc thuần regex+POS); nối vào `chain.py` (search+extract theo
+từng câu hỏi con, có cổng confidence + fork `adaptive_entity.py` cho bridge
+entity, xem 2 mục trên) - chạy được, chưa nối vào pipeline chính, chưa có
+bước tổng hợp câu trả lời cuối.
 
 Phát hiện quan trọng nhất: **ép model nhỏ chỉ được "search, không được suy
 luận" theo nghĩa chặt (mode extract) làm giảm độ tin cậy so với cho nó
@@ -369,11 +415,14 @@ nguồn/lần sinh chỉ khử được lỗi ngẫu nhiên, không khử đư�
 lặp lại giống nhau giữa các nguồn** - "confident" không đồng nghĩa "đúng"
 ở các câu multi-hop hoặc dùng kiến thức có thể lỗi thời.
 
-Bước tiếp theo hợp lý: nối `decompose.py` vào `adaptive.py`/pipeline chính -
-câu hỏi tách được thì search+chain từng bước (dùng kết quả bước 1 điền vào
-`{X}` ở bước 2), câu hỏi không tách được thì chạy như cũ; thử mode extract
-với model 1.5B (có tuân theo instruction có điều kiện tốt hơn không?); chạy
-nhiều câu hỏi hơn để xác nhận tương quan RAM pressure/chất lượng câu trả lời;
-thử câu hỏi tiếng Anh/Việt với n lớn hơn để kết luận chắc về sự khác biệt
-ngôn ngữ; thử lại 2 case multi-hop/NATO còn sai với model 1.5B để xem lỗi có
-phải do quy mô model hay do search/snippet chất lượng thấp.
+Bước tiếp theo hợp lý: nối `chain.py` vào `pipeline.py` chính (câu hỏi tách
+được thì chain, không tách được thì chạy như cũ); test nhánh `_expects_number`
+(route câu hỏi số liệu về `adaptive.py` gốc) với 1 case bridge thật sự đủ
+confident ở bước 1 để đi tới bước 2 - chưa có case nào verify được nhánh này
+bằng thực nghiệm; nghĩ bước tổng hợp câu trả lời cuối cho câu hỏi gốc (đầu ra,
+cố tình chưa làm); thử mode extract với model 1.5B (có tuân theo instruction
+có điều kiện tốt hơn không?); chạy nhiều câu hỏi hơn để xác nhận tương quan
+RAM pressure/chất lượng câu trả lời; thử câu hỏi tiếng Anh/Việt với n lớn hơn
+để kết luận chắc về sự khác biệt ngôn ngữ; thử lại 2 case multi-hop/NATO còn
+sai với model 1.5B để xem lỗi có phải do quy mô model hay do search/snippet
+chất lượng thấp.

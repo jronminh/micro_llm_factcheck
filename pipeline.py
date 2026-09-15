@@ -104,6 +104,19 @@ SYSTEM_PROMPTS = {
         'Trả lời: {"chu_ngu": "Thủ đô Việt Nam", "tu_noi": "", "phu_ngu": "", "phan_hoi": "là gì"}\n\n'
         "Chỉ trả về JSON đúng định dạng như trên, không giải thích, không thêm chữ nào khác."
     ),
+    # Dùng cho adaptive_entity.py (bước bridge trong chain.py) - khác
+    # extract_unconditional ở chỗ hẹp hơn nhiều: chỉ cần 1 tên riêng, không
+    # phải 1 câu/cụm bất kỳ. extract_unconditional vẫn để model tự do trích
+    # "câu/cụm phù hợp" nên hay lan man vào việc nhắc lại tiêu đề/phần dẫn của
+    # snippet trước khi vào nội dung ("[1] Bài 19: Các nước láng...") - cắt
+    # ngắn n_predict không sửa được việc này (chỉ cắt cụt giữa chừng phần lan
+    # man, xem README), phải chặn ngay từ prompt.
+    "extract_entity": (
+        "Bạn là một công cụ tìm kiếm, không phải trợ lý hội thoại. Đọc đoạn trích dưới đây "
+        "và trả lời câu hỏi bằng ĐÚNG MỘT tên riêng (tên quốc gia, thành phố, người, tổ chức...). "
+        "KHÔNG lặp lại tiêu đề đoạn trích, KHÔNG kèm số thứ tự kiểu \"[1]\", KHÔNG giải thích, "
+        "KHÔNG viết thành câu. Chỉ in ra đúng cái tên đó, không gì khác."
+    ),
 }
 
 
