@@ -19,11 +19,24 @@ MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-1.5b-instruct-q4_k_m.gg
 SERVER_URL = "http://127.0.0.1:8080"
 SERVER_LOG = Path(__file__).parent / ".server.log"
 
-SYSTEM_PROMPT = (
-    "Bạn chỉ được trả lời dựa trên các đoạn trích dưới đây, không dùng kiến thức "
-    "nào khác. Khi trả lời, trích dẫn đúng câu chữ trong đoạn trích liên quan. "
-    "Nếu các đoạn trích không đủ thông tin để trả lời, nói rõ \"không có thông tin\"."
-)
+# "synth": model được phép ghép câu, miễn bám sát snippet (như trợ lý hỏi-đáp).
+# "extract": model chỉ được copy nguyên văn một đoạn trong snippet, không diễn
+# giải, không ghép câu — ép nó hoạt động như một công cụ tìm-và-trích, không
+# phải một model đang "trả lời".
+SYSTEM_PROMPTS = {
+    "synth": (
+        "Bạn chỉ được trả lời dựa trên các đoạn trích dưới đây, không dùng kiến thức "
+        "nào khác. Khi trả lời, trích dẫn đúng câu chữ trong đoạn trích liên quan. "
+        "Nếu các đoạn trích không đủ thông tin để trả lời, nói rõ \"không có thông tin\"."
+    ),
+    "extract": (
+        "Bạn là một công cụ tìm kiếm, không phải trợ lý hội thoại. Nhiệm vụ duy nhất: "
+        "tìm trong các đoạn trích dưới đây một câu hoặc cụm từ NGUYÊN VĂN (copy chính "
+        "xác từng chữ, không viết lại, không thêm từ nối, không giải thích) trả lời "
+        "trực tiếp yêu cầu. Chỉ in ra đúng đoạn đó, không gì khác. Nếu không có đoạn "
+        "nào phù hợp, in ra đúng một từ: KHONG_CO."
+    ),
+}
 
 
 def _server_ready() -> bool:
@@ -58,13 +71,13 @@ def build_user_prompt(question: str, snippets: list[dict]) -> str:
     return f"Đoạn trích:\n{context}\n\nCâu hỏi: {question}"
 
 
-def run_model(user_prompt: str, n_predict: int = 200) -> dict:
+def run_model(user_prompt: str, mode: str = "synth", n_predict: int = 200) -> dict:
     ensure_server()
     resp = requests.post(
         f"{SERVER_URL}/v1/chat/completions",
         json={
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": SYSTEM_PROMPTS[mode]},
                 {"role": "user", "content": user_prompt},
             ],
             "max_tokens": n_predict,
@@ -81,10 +94,10 @@ def run_model(user_prompt: str, n_predict: int = 200) -> dict:
     }
 
 
-def answer_question(question: str, n_results: int = 5) -> dict:
+def answer_question(question: str, n_results: int = 5, mode: str = "synth") -> dict:
     snippets = search(question, n=n_results)
     user_prompt = build_user_prompt(question, snippets)
-    model_result = run_model(user_prompt)
+    model_result = run_model(user_prompt, mode=mode)
     return {"question": question, "snippets": snippets, **model_result}
 
 

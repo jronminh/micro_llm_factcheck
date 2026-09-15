@@ -132,12 +132,57 @@ sát snippet, không thấy khác biệt rõ về chất lượng ở mức test
 cần thử nhiều câu hỏi khó hơn (đa bước, số liệu) để thấy giới hạn thật của
 0.5B.
 
+## Tiếng Anh vs tiếng Việt (0.5B)
+
+So sánh 4 cặp câu hỏi cùng nội dung, một bằng tiếng Việt một bằng tiếng
+Anh (`Dân số VN 2026`, `Everest`, `World Cup 2026`, `thủ đô Pháp`). 3/4
+cặp cho chất lượng tương đương ở cả hai ngôn ngữ; chỉ 1 cặp (dân số VN)
+tiếng Việt bị hỏng (model lặp lại câu hỏi, không ra số liệu) trong khi
+tiếng Anh trả lời đúng. `gen_tps` giữa hai ngôn ngữ không khác biệt đáng
+kể. Với n=4, chưa đủ để khẳng định tiếng Anh tốt hơn hệ thống — có thể chỉ
+là 0.5B ngẫu nhiên yếu ở câu có số liệu phức tạp, không phải do ngôn ngữ.
+Cần thêm dữ liệu nếu muốn kết luận chắc.
+
+## Test nhiều dạng câu hỏi + mode "extractive" (0.5B)
+
+`explore_formats.py` chạy 8 dạng câu hỏi khác nhau (câu hỏi đầy đủ, có/không,
+kiểu từ khóa như gõ vào ô search, so sánh, liệt kê, mở/rộng, ngoài phạm vi,
+định nghĩa ngắn) qua 2 mode prompt:
+
+- **synth**: model được phép ghép câu, miễn bám sát snippet (như hiện tại).
+- **extract**: ép model chỉ được copy nguyên văn một đoạn trong snippet,
+  không diễn giải, không ghép câu — cố tình cho nó hoạt động gần với một
+  "công cụ tìm kiếm" hơn là một model đang suy luận, đúng ý tưởng gốc "chỉ
+  được search, không được suy luận".
+
+Kết quả: **synth 6/8 đúng, extract chỉ 3/8 đúng rõ ràng.** Ép 0.5B vào vai
+"chỉ trích xuất nguyên văn" làm giảm độ tin cậy, không tăng — lỗi thường
+gặp ở mode extract: model trả về `[2]` (chỉ số thứ tự snippet, không có
+nội dung), hoặc trích tiêu đề snippet (trùng cấu trúc với câu hỏi) thay vì
+nội dung trả lời thật. Ở cả 2 mode, khi search không có snippet đủ tốt,
+model có xu hướng lặp lại câu hỏi thay vì tuân theo chỉ dẫn "nói rõ không
+có thông tin" / in `KHONG_CO` — cho thấy 0.5B theo instruction có điều
+kiện ("nếu... thì...") kém ổn định, đây là giới hạn thật của quy mô model,
+không phải vấn đề prompt engineering.
+
+Điểm tích cực: câu hỏi kiểu từ khóa ngắn (không phải câu hoàn chỉnh, ví dụ
+"dân số hà nội 2026") hoạt động tốt ở cả 2 mode — đúng với việc dùng model
+gần với một search engine thật.
+
 ## Trạng thái
 
 Bản chạy được đầu tiên hoàn chỉnh: search + model (server warm) + benchmark
-ghi log, đã test qua 8 câu hỏi đa dạng lĩnh vực với model 1.5B, và so sánh
-thêm với model 0.5B trên 3 câu hỏi. Prompt grounding hoạt động đúng cả khi
-có đủ thông tin (trích dẫn "[1]") và khi thiếu thông tin (từ chối trả lời).
-Bước tiếp theo hợp lý: chạy nhiều câu hỏi hơn (đặc biệt câu hỏi khó cho
-0.5B) để xác nhận tương quan RAM pressure/chất lượng câu trả lời, và tìm
-điểm 0.5B bắt đầu trả lời sai/kém so với 1.5B.
+ghi log. Đã test: 8 câu hỏi đa dạng lĩnh vực với 1.5B; so sánh tốc độ 1.5B
+vs 0.5B; tiếng Anh vs tiếng Việt; 8 dạng câu hỏi khác nhau ở 2 mode prompt
+(synth/extract) với 0.5B.
+
+Phát hiện quan trọng nhất: **ép model nhỏ chỉ được "search, không được suy
+luận" theo nghĩa chặt (mode extract) làm giảm độ tin cậy so với cho nó
+tổng hợp nhẹ (mode synth)** — 0.5B không đủ khả năng theo instruction có
+điều kiện phức tạp một cách ổn định. Đây ngược với giả định ban đầu của ý
+tưởng, và là giới hạn thật của quy mô model, không phải vấn đề prompt.
+
+Bước tiếp theo hợp lý: thử mode extract với model 1.5B (có tuân theo
+instruction có điều kiện tốt hơn không?); chạy nhiều câu hỏi hơn để xác
+nhận tương quan RAM pressure/chất lượng câu trả lời; thử câu hỏi tiếng
+Anh/Việt với n lớn hơn để kết luận chắc về sự khác biệt ngôn ngữ.
