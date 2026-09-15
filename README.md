@@ -248,6 +248,36 @@ model nhỏ, không phải bug tham số - cần một cơ chế khác (ví dụ
 với nguồn có uy tín cao hơn, hoặc phát hiện câu hỏi dạng multi-hop để hạ
 tin cậy mặc định) nếu muốn giải quyết, không chỉ chỉnh số.
 
+### Thêm 2 chỉ số thống kê: coverage và bias
+
+`agreement` (cỡ cụm thắng / số link *có phản hồi*) không lộ ra khi nhiều
+link bị timeout/lỗi, và không phân biệt được đồng thuận độc lập thật với
+đồng thuận do trùng nguồn. Thêm 2 chỉ số vào output của
+`answer_question_per_link`, tính hoàn toàn từ dữ liệu đã có, không tốn thêm
+lượt gọi model:
+
+- **coverage** = cỡ cụm thắng / tổng số link **đã thử** (kể cả timeout/lỗi,
+  qua counter `n_attempted`) - khác `agreement` khi có link fail; agreement
+  cao mà coverage thấp nghĩa là nhiều link đã "rớt" trước khi tính đồng thuận.
+- **bias** = 1 - (số domain khác nhau / cỡ cụm thắng) trong cụm thắng, parse
+  hostname từ `url` của snippet (`urllib.parse`). 0 = mọi link trong cụm đến
+  từ domain khác nhau (đồng thuận độc lập), gần 1 = cụm thắng chủ yếu dựa
+  vào rất ít domain lặp lại (rủi ro echo-chamber).
+
+Test lại case NATO: `bias=0.0` - mọi domain trong cụm thắng khác nhau (2
+phiên bản Wikipedia, ai-hay.vn, tuoitre.vn...) - khớp đúng, đây là bất đồng
+thật giữa nguồn độc lập.
+
+Test lại case multi-hop (chạy lại, search trả bộ link khác do DDG không ổn
+định giữa các lần gọi - lần này đa số ra đúng "Bắc Kinh"): `bias=0.12`, khá
+thấp, dù đã biết nội dung các nguồn tương quan cao (đều paraphrase cùng một
+bài "Địa Lí lớp 5 - Bài 19"). **Hạn chế thật đã lộ ra**: bias theo domain chỉ
+bắt được kiểu tương quan "cùng 1 site lặp lại", không bắt được kiểu sâu hơn
+"nhiều domain độc lập nhưng cùng chép/paraphrase một nguồn gốc" (ví dụ cùng
+một sách giáo khoa) - đây chính là dạng tương quan đã gây ra case "Lào" sai
+mà agreement cao ở lần test trước. Muốn bắt được dạng này cần so khớp nội
+dung snippet gốc (không chỉ domain), chưa làm.
+
 ## Trạng thái
 
 Bản chạy được đầu tiên hoàn chỉnh: search + model (server warm) + benchmark

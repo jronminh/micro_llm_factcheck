@@ -34,6 +34,7 @@ if __name__ == "__main__":
         print(
             f"  verdict={out['verdict']} confident={out.get('confident')} "
             f"n_links_used={out.get('n_links_used')} agreement={out.get('agreement')} "
+            f"coverage={out.get('coverage')} bias={out.get('bias')} "
             f"elapsed={elapsed:.1f}s"
         )
         print()

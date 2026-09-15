@@ -25,6 +25,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -76,21 +77,32 @@ def _cluster(texts: list[str], sim_threshold: float) -> list[list[int]]:
     return clusters
 
 
-def _best_cluster_result(question: str, answers: list[tuple[str, str]], cluster_sim_threshold: float) -> dict | None:
+def _best_cluster_result(
+    question: str, answers: list[tuple[str, str]], snippets: list[dict], cluster_sim_threshold: float,
+) -> dict | None:
     # Mẫu degenerate ("[2]", rỗng...) không tham gia cluster - nếu không,
     # nhiều lần degenerate giống hệt nhau có thể thắng đồng thuận dù không có
-    # nội dung thật.
-    usable = [(a, v) for a, v in answers if v != "degenerate"]
+    # nội dung thật. snippets phải lọc song song với answers để giữ đúng chỉ
+    # số khi tính domain của cluster thắng (bias).
+    usable = [(a, v, s) for (a, v), s in zip(answers, snippets) if v != "degenerate"]
     if not usable:
         return None
-    texts = [a for a, _ in usable]
+    texts = [a for a, _, _ in usable]
     clusters = _cluster(texts, cluster_sim_threshold)
     clusters.sort(key=len, reverse=True)
     top = clusters[0]
     representative = max((usable[i][0] for i in top), key=len)
+    # bias: tỉ lệ trùng domain trong cụm thắng - 0 nghĩa là mọi link đến từ
+    # domain khác nhau (đồng thuận độc lập thật), gần 1 nghĩa là cụm thắng
+    # chủ yếu dựa vào rất ít domain lặp lại (rủi ro echo-chamber, nhiều trang
+    # cùng chia sẻ một nội dung/lỗi gốc - xem case "thủ đô nước láng giềng
+    # phía bắc VN" trong README, agreement cao nhưng sai vì corpus lệch).
+    domains = [urlparse(usable[i][2].get("url") or "").hostname for i in top]
+    domains = [d for d in domains if d]
+    bias = round(1 - len(set(domains)) / len(domains), 2) if domains else None
     # Chia theo tổng số link đã thử (kể cả degenerate), để link hỏng vẫn kéo
     # đồng thuận xuống thay vì bị coi như chưa từng xảy ra.
-    return {"answer": representative, "agreement": len(top) / len(answers)}
+    return {"answer": representative, "agreement": len(top) / len(answers), "cluster_size": len(top), "bias": bias}
 
 
 def _process_link(
@@ -137,6 +149,7 @@ def answer_question_per_link(
     cache = _load_cache() if use_cache else {}
     answers: list[tuple[str, str]] = []
     used_snippets: list[dict] = []  # song song với answers - chỉ chứa link thật sự có kết quả
+    n_attempted = 0  # kể cả link timeout/lỗi - answers/used_snippets chỉ chứa link có phản hồi
 
     for batch_start in range(0, len(snippets), N_PARALLEL):
         if time.monotonic() >= deadline:
@@ -144,6 +157,7 @@ def answer_question_per_link(
                 print(f"[debug] hết timeout_s={timeout_s}s trước link {batch_start + 1}, dừng", flush=True)
             break
         batch = list(enumerate(snippets[batch_start:batch_start + N_PARALLEL], start=batch_start + 1))
+        n_attempted += len(batch)
 
         to_run = []  # (idx, snippet, key) - phần không có cache, phải gọi model
         for idx, snippet in batch:
@@ -192,9 +206,13 @@ def answer_question_per_link(
 
         if len(answers) < min_votes:
             continue
-        best = _best_cluster_result(question, answers, cluster_sim_threshold)
+        best = _best_cluster_result(question, answers, used_snippets, cluster_sim_threshold)
         if debug and best:
-            print(f"[debug]   đồng thuận: {best['agreement']:.2f} (ngưỡng {consensus_threshold})", flush=True)
+            print(
+                f"[debug]   đồng thuận: {best['agreement']:.2f} (ngưỡng {consensus_threshold}) "
+                f"coverage={best['cluster_size'] / n_attempted:.2f} bias={best['bias']}",
+                flush=True,
+            )
         if best and best["agreement"] >= consensus_threshold:
             if debug:
                 print(f"[debug] đạt ngưỡng sau {len(answers)} link, dừng sớm", flush=True)
@@ -202,11 +220,12 @@ def answer_question_per_link(
                 "question": question, "answer": best["answer"],
                 "verdict": score_answer(question, best["answer"], used_snippets)["verdict"],
                 "n_links_used": len(answers), "agreement": round(best["agreement"], 2),
+                "coverage": round(best["cluster_size"] / n_attempted, 2), "bias": best["bias"],
                 "confident": True, "snippets": used_snippets,
             }
 
     # Hết link hoặc hết giờ mà chưa đạt ngưỡng - trả cụm lớn nhất đã có.
-    best = _best_cluster_result(question, answers, cluster_sim_threshold)
+    best = _best_cluster_result(question, answers, used_snippets, cluster_sim_threshold)
     if debug:
         print(
             f"[debug] hết link/timeout sau {len(answers)} link, "
@@ -219,6 +238,7 @@ def answer_question_per_link(
         "question": question, "answer": best["answer"],
         "verdict": score_answer(question, best["answer"], used_snippets)["verdict"],
         "n_links_used": len(answers), "agreement": round(best["agreement"], 2),
+        "coverage": round(best["cluster_size"] / n_attempted, 2), "bias": best["bias"],
         "confident": False, "snippets": used_snippets,
     }
 
@@ -241,5 +261,6 @@ if __name__ == "__main__":
     print(
         f"verdict={out['verdict']} confident={out.get('confident')} "
         f"n_links_used={out.get('n_links_used')} agreement={out.get('agreement')} "
+        f"coverage={out.get('coverage')} bias={out.get('bias')} "
         f"elapsed={elapsed:.1f}s"
     )
