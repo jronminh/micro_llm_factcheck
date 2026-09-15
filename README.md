@@ -85,29 +85,42 @@ prompt vào stdout xen với câu trả lời (và cắt ngắn phần echo khi 
 dài), không có ranh giới rõ ràng để tách câu trả lời bằng regex.
 `llama-server` trả JSON sạch (`choices[0].message.content` + `timings`).
 
-## Kết quả benchmark ban đầu (Samsung SM-S7110, 7 core)
+## Kết quả benchmark (Samsung SM-S7110, 7 core, n=8 câu hỏi)
 
 `llama-bench` baseline (không search, không qua HTTP): pp512 ~24 t/s,
-tg128 ~6.8 t/s. Sau đó chạy full pipeline (search + server) cho 3 câu hỏi,
-server giữ warm giữa các lần:
+tg128 ~6.8 t/s. Sau đó chạy full pipeline (search + server) cho 8 câu hỏi
+đa dạng lĩnh vực, server giữ warm giữa các lần:
 
-| câu hỏi | search_s | model_s | gen_tps |
-|---|---|---|---|
-| Dân số VN 2026 | 1.12 | 28.3 | 8.7 |
-| Tổng thống Mỹ hiện tại | 0.86 | 18.8 | 8.9 |
-| Giá vàng hôm nay | 0.86 | 53.2 | 0.5 |
+| câu hỏi | search_s | model_s | gen_tps | câu trả lời |
+|---|---|---|---|---|
+| Dân số VN 2026 | 1.12 | 28.3 | 8.7 | "102.457.889 người, theo đoạn trích [1]" |
+| Tổng thống Mỹ hiện tại | 0.86 | 18.8 | 8.9 | "Donald Trump" |
+| Giá vàng hôm nay | 0.86 | 53.2 | 0.5 | lặp lại tiêu đề snippet (hỏng) |
+| Chiều cao Everest | 1.80 | 24.4 | 7.0 | "8.848,86 mét" |
+| Tỷ giá USD/VND | 1.08 | 24.6 | 6.3 | "25.750đ" |
+| World Cup 2026 | 0.93 | 24.3 | 6.3 | "Mỹ, Canada và Mexico" |
+| Python là ngôn ngữ gì | 1.05 | 32.2 | 7.0 | tóm tắt đúng |
+| Nhiệt độ Hà Nội hiện tại | 1.06 | 19.1 | 8.0 | "không có thông tin cụ thể... không được đáp ứng" |
 
-Search luôn nhanh (dưới 1.2s). `gen_tps` dao động rất mạnh cho cùng một
-model đã warm (8.9 t/s xuống 0.5 t/s) — RAM pressure trên máy (lúc đo chỉ
-~1.6GB available/7.1GB, swap 5.2/11GB) ảnh hưởng performance nhiều hơn cả
-kích thước model. Câu hỏi "giá vàng" cũng ra câu trả lời hỏng (lặp lại tiêu
-đề snippet thay vì tổng hợp) đúng lúc gen_tps thấp nhất — nghi ngờ có liên
-quan, cần thêm dữ liệu để xác nhận.
+Thống kê: `search_s` avg 1.09 (0.86-1.80), luôn nhanh và ổn định. `model_s`
+avg 28.1 (18.8-53.2). `gen_tps` avg 6.60, median 7.00, nhưng có 1 outlier
+rơi xuống 0.5 — trùng đúng lúc RAM pressure cao nhất (máy lúc đo chỉ
+~1.6GB available/7.1GB, swap 5.2/11GB) và cũng là câu trả lời hỏng nhất.
+
+Hai quan sát đáng chú ý:
+
+1. **Ràng buộc "chỉ dùng snippet" hoạt động đúng thiết kế** — câu hỏi về
+   nhiệt độ Hà Nội, model tự nhận không đủ thông tin và từ chối trả lời
+   thay vì bịa, đúng ý ban đầu của ý tưởng grounding.
+2. **RAM pressure có thể ảnh hưởng cả chất lượng, không chỉ tốc độ** — outlier
+   0.5 t/s trùng với câu trả lời tệ nhất (lặp tiêu đề snippet). Mới quan sát
+   được 1 lần, n=8 chưa đủ để khẳng định tương quan, cần thêm dữ liệu.
 
 ## Trạng thái
 
 Bản chạy được đầu tiên hoàn chỉnh: search + model (server warm) + benchmark
-ghi log. Model 1.5B chạy được trên Termux, prompt grounding hoạt động đúng
-(model trích dẫn "[1]" khi có snippet phù hợp). Bước tiếp theo hợp lý: chạy
-nhiều câu hỏi hơn để xác nhận tương quan giữa RAM pressure và chất lượng
-câu trả lời, và/hoặc thử model 0.5B để so sánh.
+ghi log, đã test qua 8 câu hỏi đa dạng lĩnh vực. Model 1.5B chạy được trên
+Termux, prompt grounding hoạt động đúng cả khi có đủ thông tin (trích dẫn
+"[1]") và khi thiếu thông tin (từ chối trả lời). Bước tiếp theo hợp lý:
+chạy nhiều câu hỏi hơn để xác nhận tương quan RAM pressure/chất lượng câu
+trả lời, và/hoặc thử model 0.5B để so sánh.

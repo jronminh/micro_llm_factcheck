@@ -2,3 +2,8 @@ timestamp,question,search_s,model_s,total_s,prompt_tps,gen_tps,n_snippets,answer
 2026-09-15T12:11:09+00:00,Dan so Viet Nam nam 2026 la bao nhieu?,1.12,28.27,29.39,25.978983834456834,8.7306912404046,5,"Dân số Việt Nam năm 2026 được dự báo sẽ đạt khoảng 102.457.889 người vào đầu năm 2027, theo đoạn trích [1]."
 2026-09-15T12:11:58+00:00,Ai la tong thong My hien tai?,0.86,18.8,19.66,26.257088058110813,8.907639920802984,5,Tổng thống Mỹ hiện tại là Donald Trump.
 2026-09-15T12:12:52+00:00,Gia vang hom nay la bao nhieu?,0.86,53.16,54.02,19.457927818023297,0.5003860478359055,5,1 Chỉ Vàng Bao Nhiêu Tiền Hôm Nay
+2026-09-15T12:15:18+00:00,Chieu cao nui Everest la bao nhieu?,1.8,24.36,26.16,23.43447951094742,7.043323855737899,5,"Chieu cao nui Everest la 8.848,86 mét."
+2026-09-15T12:15:44+00:00,Ty gia USD sang VND hom nay la bao nhieu?,1.08,24.63,25.72,23.53813971190059,6.292466501792392,5,Độ tương ứng của 100 USD sang đồng Việt Nam hôm nay (năm 2026) là 25.750đ.
+2026-09-15T12:16:10+00:00,World Cup 2026 to chuc o dau?,0.93,24.34,25.26,23.526424995084742,6.2809242050967,5,"World Cup 2026 tổ chức ở 3 quốc gia: Mỹ, Canada và Mexico."
+2026-09-15T12:16:43+00:00,Python la ngon ngu lap trinh gi?,1.05,32.24,33.28,23.065174940773968,6.965096650538598,5,"Python là một ngôn ngữ lập trình bậc cao, mã nguồn mở và đa nền tảng. Nó hỗ trợ nhiều mô hình lập trình, bao gồm lập trì"
+2026-09-15T12:17:04+00:00,Nhiet do hien tai o Ha Noi la bao nhieu?,1.06,19.14,20.2,23.195978549824048,8.049972388594707,5,"Trong đoạn trích, không có thông tin cụ thể về nhiệt độ hiện tại ở Hà Nội. Câu hỏi này không được đáp ứng từ đoạn trích "
