@@ -298,13 +298,65 @@ nhiều nguồn diễn đạt giống nhau khi cùng nói một fact đơn giả
 Đây chỉ là chỉ số phụ trợ đo độ độc lập của bằng chứng, không thay được
 việc phải nhìn cả agreement + bias + content_bias cùng nhau.
 
+## Phân rã câu hỏi multi-hop (decompose.py)
+
+Hướng đầu vào: thay vì search 1 lần cho cả câu hỏi rồi trông chờ voting/bias
+sửa lỗi hệ thống (không sửa được - xem case "thủ đô nước láng giềng phía bắc
+VN" ở trên), thử tách câu hỏi multi-hop thành các câu hỏi con để search riêng
+từng bước *trước khi* search. Thử 4 cách tiếp cận, từ để model tự sinh đến
+thuần quy tắc:
+
+1. **LLM tự sinh câu hỏi con (mode `decompose`, zero-shot)**: đúng format JSON
+   100%, nhưng bỏ sót chính case multi-hop cần tách nhất, sinh placeholder
+   degenerate ("câu hỏi con 1"), hoặc mất thuộc tính khi tách câu so sánh (mất
+   "chiều cao" khi tách "Eiffel cao hơn Tokyo Skytree bao nhiêu mét").
+2. **LLM tự sinh, few-shot (3 ví dụ)**: sửa được 2 lỗi trên, nhưng lộ lỗi nguy
+   hiểm hơn - câu hỏi multi-hop tiếng Anh ("...borders Vietnam **to the
+   north**") bị model **copy nhầm nội dung ví dụ** ("phía Tây" từ ví dụ, thay
+   vì "phía Bắc" từ câu hỏi thật) - lỗi tự tin nhưng sai nội dung, nguy hiểm
+   hơn hẳn lỗi degenerate rõ ràng vì không lọc được bằng `score.py`.
+3. **LLM chỉ gắn nhãn cụm có sẵn (mode `tag`), Python tự ráp câu hỏi con**:
+   giảm việc "sinh" xuống còn "định vị" (gần giống mode extract). Tốt hơn về
+   lý thuyết nhưng thực tế vẫn ~4/10 case ra tag rác hoặc JSON key trùng lặp,
+   một case còn tự dịch cả câu hỏi tiếng Anh sang tiếng Việt rồi tag bản dịch.
+   Điểm sáng: bắt đúng được case genitive ẩn (không có "của" tường minh) mà
+   regex thuần không làm được.
+4. **Quy tắc thuần (regex + từ loại thật cho tiếng Anh), không gọi model**:
+   `decompose.py`. Bắt 2 loại cấu trúc: (a) genitive lồng nhau "X của
+   Y [là gì/là ai/ở đâu/là bao nhiêu]" / "What is X of Y" - chỉ tách khi Y
+   cần tra cứu riêng; (b) so sánh 2 thực thể "A hơn B bao nhiêu" / so sánh
+   theo 2 mốc thời gian "...năm A so với năm B tăng/giảm bao nhiêu lần".
+   Tín hiệu "Y cần tra cứu riêng" **khác nhau có chủ đích giữa 2 ngôn ngữ**:
+   tiếng Việt phân tích tính, so sánh nhất luôn dùng tiểu từ rời "nhất" nên
+   1 từ khóa bắt hết mọi tính từ; tiếng Anh biến hình "-est" theo từng từ
+   ("tallest"/"largest"/"richest"...) nên từ khóa không đủ, phải dùng POS tag
+   thật (`nltk`, nhãn JJS/RBS/WDT/WP) mới tổng quát hóa được. Kết quả: 10/10
+   case test (VN + EN, gồm cả 2 case so sánh nhất dùng từ gốc khác nhau) đúng,
+   không case nào tách sai - đổi lại bỏ sót có chủ đích các case không theo
+   cấu trúc đã liệt kê (vd nối bằng động từ như "...chơi cho câu lạc bộ nào?",
+   hoặc genitive ẩn hoàn toàn không có "của").
+
+Thử `pyvi`/`underthesea` (NLP tiếng Việt) trước khi chọn `nltk`+regex - bỏ vì
+kéo theo build `scipy`/`scikit-learn` từ source (tự bootstrap cả `cmake`),
+quá nặng cho Termux/Android, không đáng cho việc chỉ cần bắt 1-2 tiểu từ ngữ
+pháp cố định.
+
+**Kết luận chung của cả 4 cách**: độ tin cậy tỉ lệ nghịch với mức độ phải
+"hiểu"/"sinh" của model - quy tắc dựa tín hiệu hình thức có thật (từ nối, POS
+tag) không bao giờ tách sai (chỉ có thể bỏ sót), còn mọi mức độ để model tự
+suy luận/sinh chữ đều có tỷ lệ lỗi đáng kể, kể cả khi đã thu hẹp xuống "chỉ gắn
+nhãn". `decompose.py` **chưa được nối vào `adaptive.py`/pipeline chính** -
+mới dừng ở bước tách câu hỏi độc lập, chưa chạy search+chain thật cho từng
+câu hỏi con.
+
 ## Trạng thái
 
 Bản chạy được đầu tiên hoàn chỉnh: search + model (server warm) + benchmark
 ghi log. Đã test: 8 câu hỏi đa dạng lĩnh vực với 1.5B; so sánh tốc độ 1.5B
 vs 0.5B; tiếng Anh vs tiếng Việt; 8 dạng câu hỏi khác nhau ở 2 mode prompt
 (synth/extract) với 0.5B; tune `adaptive.py` (per-link consensus) với 8 câu
-hỏi khó hơn.
+hỏi khó hơn; khảo sát phân rã câu hỏi multi-hop trước khi search (4 cách,
+chốt ở quy tắc thuần regex+POS, xem mục trên).
 
 Phát hiện quan trọng nhất: **ép model nhỏ chỉ được "search, không được suy
 luận" theo nghĩa chặt (mode extract) làm giảm độ tin cậy so với cho nó
@@ -317,9 +369,11 @@ nguồn/lần sinh chỉ khử được lỗi ngẫu nhiên, không khử đư�
 lặp lại giống nhau giữa các nguồn** - "confident" không đồng nghĩa "đúng"
 ở các câu multi-hop hoặc dùng kiến thức có thể lỗi thời.
 
-Bước tiếp theo hợp lý: thử mode extract với model 1.5B (có tuân theo
-instruction có điều kiện tốt hơn không?); chạy nhiều câu hỏi hơn để xác
-nhận tương quan RAM pressure/chất lượng câu trả lời; thử câu hỏi tiếng
-Anh/Việt với n lớn hơn để kết luận chắc về sự khác biệt ngôn ngữ; thử lại
-2 case multi-hop/NATO còn sai với model 1.5B để xem lỗi có phải do quy mô
-model hay do search/snippet chất lượng thấp.
+Bước tiếp theo hợp lý: nối `decompose.py` vào `adaptive.py`/pipeline chính -
+câu hỏi tách được thì search+chain từng bước (dùng kết quả bước 1 điền vào
+`{X}` ở bước 2), câu hỏi không tách được thì chạy như cũ; thử mode extract
+với model 1.5B (có tuân theo instruction có điều kiện tốt hơn không?); chạy
+nhiều câu hỏi hơn để xác nhận tương quan RAM pressure/chất lượng câu trả lời;
+thử câu hỏi tiếng Anh/Việt với n lớn hơn để kết luận chắc về sự khác biệt
+ngôn ngữ; thử lại 2 case multi-hop/NATO còn sai với model 1.5B để xem lỗi có
+phải do quy mô model hay do search/snippet chất lượng thấp.

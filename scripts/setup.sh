@@ -9,8 +9,17 @@ MODEL_DIR="$REPO_DIR/models"
 echo "== pkg install llama-cpp =="
 pkg install -y llama-cpp
 
-echo "== pip install requests beautifulsoup4 =="
-pip install --quiet requests beautifulsoup4
+echo "== pip install requests beautifulsoup4 nltk =="
+pip install --quiet requests beautifulsoup4 nltk
+
+# nltk: chỉ dùng để POS-tag câu hỏi tiếng Anh trong decompose.py (bắt nhãn
+# JJS/RBS/WDT/WP - so sánh nhất và mệnh đề quan hệ - việc liệt kê từ khóa
+# không làm được vì tiếng Anh biến hình "-est" theo từng từ). Không dùng
+# pyvi/underthesea cho tiếng Việt: kéo theo build scipy/cmake từ source, quá
+# nặng cho Termux/Android - tiếng Việt là ngôn ngữ phân tích tính, so sánh
+# nhất luôn dùng tiểu từ rời "nhất" nên chỉ cần từ khóa, không cần NLP thật.
+echo "== tải nltk data (POS tagger + tokenizer tiếng Anh) =="
+python3 -c "import nltk; nltk.download('averaged_perceptron_tagger_eng', quiet=True); nltk.download('punkt_tab', quiet=True)"
 
 mkdir -p "$MODEL_DIR"
 

@@ -60,6 +60,50 @@ SYSTEM_PROMPTS = {
         "xác từng chữ, không viết lại, không thêm từ nối, không giải thích) trả lời "
         "trực tiếp yêu cầu. Chỉ in ra đúng đoạn đó, không gì khác."
     ),
+    # Khảo sát v1: chỉ mô tả quy tắc trừu tượng ("nếu multi-hop thì tách"), bắt
+    # model tự suy luận khi nào áp dụng - kết quả rất tệ (xem README): bỏ sót
+    # đúng case multi-hop cần tách nhất, sinh placeholder degenerate
+    # ("câu hỏi con 1"), hoặc tách mất thuộc tính (mất "chiều cao" khi tách câu
+    # so sánh 2 tháp). Model cỡ 0.5B không có khả năng suy luận điều kiện ổn
+    # định - đừng bắt nó suy luận "khi nào nên tách", đưa thẳng ví dụ cụ thể để
+    # nó bắt chước pattern (few-shot) thay vì diễn giải quy tắc trừu tượng hơn.
+    "decompose": (
+        "Tách câu hỏi thành các câu hỏi con để search, theo đúng 3 ví dụ dưới đây. "
+        "Dùng {X} để chỉ kết quả câu hỏi con ngay trước, nếu câu hỏi con sau cần dùng nó.\n\n"
+        'Câu hỏi: "Thủ đô của nước giáp Việt Nam ở phía Tây là gì?"\n'
+        'Trả lời: {"steps": ["Nước nào giáp Việt Nam ở phía Tây?", "Thủ đô của {X} là gì?"]}\n\n'
+        'Câu hỏi: "Tháp Eiffel cao hơn tháp Big Ben bao nhiêu mét?"\n'
+        'Trả lời: {"steps": ["Tháp Eiffel cao bao nhiêu mét?", "Tháp Big Ben cao bao nhiêu mét?"]}\n\n'
+        'Câu hỏi: "Thủ đô Nhật Bản là gì?"\n'
+        'Trả lời: {"steps": ["Thủ đô Nhật Bản là gì?"]}\n\n'
+        "Chỉ trả về JSON đúng định dạng như trên, không giải thích, không thêm chữ nào khác."
+    ),
+    # Khảo sát v2: thay vì bắt model tự tạo ra câu hỏi con (sinh chữ mới, dễ
+    # hallucinate - xem case "phía Tây" ở mode decompose), chỉ bắt model GẮN
+    # NHÃN các cụm có sẵn trong câu hỏi gốc (giống việc trích nguyên văn ở mode
+    # extract, vốn đáng tin hơn synth). Python sẽ tự ráp câu hỏi con từ các
+    # nhãn này (regex._needs_lookup vẫn giữ làm lưới an toàn trước khi quyết
+    # định có tách hay không) - model chỉ làm việc "định vị cụm từ", không tự
+    # quyết "có nên tách" hay "tách thế nào".
+    "tag": (
+        "Phân tích cấu trúc câu hỏi theo 4 ví dụ dưới đây. Xác định 4 phần, LẤY NGUYÊN "
+        "VĂN từ câu hỏi gốc, không viết lại: chu_ngu (cụm danh từ chính đang được hỏi), "
+        "tu_noi (từ nối như \"của\"/\"hơn\"/\"so với\", để rỗng \"\" nếu câu không có từ nối "
+        "rõ ràng), phu_ngu (cụm có thể là một thực thể riêng cần tìm hiểu thêm, để rỗng \"\" "
+        "nếu không có), phan_hoi (phần hỏi ở cuối câu).\n\n"
+        'Câu hỏi: "Thủ đô của nước láng giềng phía bắc Việt Nam là gì?"\n'
+        'Trả lời: {"chu_ngu": "Thủ đô", "tu_noi": "của", "phu_ngu": "nước láng giềng phía bắc '
+        'Việt Nam", "phan_hoi": "là gì"}\n\n'
+        'Câu hỏi: "Dân số thành phố lớn nhất Nhật Bản là bao nhiêu?"\n'
+        'Trả lời: {"chu_ngu": "Dân số", "tu_noi": "", "phu_ngu": "thành phố lớn nhất Nhật Bản", '
+        '"phan_hoi": "là bao nhiêu"}\n\n'
+        'Câu hỏi: "Tháp Eiffel cao hơn tháp Tokyo Skytree bao nhiêu mét?"\n'
+        'Trả lời: {"chu_ngu": "Tháp Eiffel cao", "tu_noi": "hơn", "phu_ngu": "tháp Tokyo '
+        'Skytree", "phan_hoi": "bao nhiêu mét"}\n\n'
+        'Câu hỏi: "Thủ đô Việt Nam là gì?"\n'
+        'Trả lời: {"chu_ngu": "Thủ đô Việt Nam", "tu_noi": "", "phu_ngu": "", "phan_hoi": "là gì"}\n\n'
+        "Chỉ trả về JSON đúng định dạng như trên, không giải thích, không thêm chữ nào khác."
+    ),
 }
 
 
