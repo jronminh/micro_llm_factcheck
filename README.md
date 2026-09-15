@@ -42,6 +42,29 @@ Chạy trên Termux/Android (điện thoại). Model từ 3B trở lên trên CP
 (vài chục giây mỗi câu trả lời). Cần cân nhắc giữa chất lượng và thời gian
 phản hồi khi chọn kích thước model.
 
+## Dự án tương tự
+
+Ý tưởng grounding LLM bằng search không mới, đã có nhiều dự án mã nguồn mở:
+
+- [Perplexica](https://github.com/topics/searxng?o=desc&s=stars) — clone mã
+  nguồn mở của Perplexity, 20k+ stars, dùng SearXNG + LLM để search và tổng
+  hợp có trích dẫn nguồn. Gần nhất với ý tưởng này về kiến trúc.
+- [Farfalle](https://github.com/rashadphz/farfalle) — self-host AI search
+  engine, hỗ trợ local LLM (Llama 3, Gemma, Mistral, Phi-3) hoặc cloud.
+- [GroundedLLM](https://github.com/wsargent/groundedllm) — agent được
+  "ground" bằng search + extract tool để giảm hallucination, gần với mục
+  tiêu "chỉ được search, không được tự suy luận".
+- [Sova](https://github.com/LexiestLeszek/sova_ollama) — RAG-based web
+  search engine dùng Ollama + scraping Google, quy mô nhỏ gọn.
+- [RAGFlow](https://github.com/infiniflow/ragflow) — RAG engine lớn hơn,
+  thiên về document search có agent, không tập trung vào web search.
+
+Điểm khác biệt (gap) trong ý tưởng này: các dự án trên đều nhắm tới model
+tầm trung/lớn (Llama 3, GPT-4, Mistral) để có chất lượng tổng hợp tốt.
+Không có dự án nào tập trung cụ thể vào model rất nhỏ (dưới 3B) kết hợp
+ràng buộc kiến trúc cứng "chỉ search, không suy luận" — hầu hết chỉ ràng
+buộc qua prompt.
+
 ## Trạng thái
 
 Mới ở giai đoạn ý tưởng, chưa có code.
