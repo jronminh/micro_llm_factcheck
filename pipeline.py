@@ -8,6 +8,7 @@ JSON sạch, đồng thời giữ model warm giữa các lần gọi.
 """
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -18,6 +19,20 @@ from search import search
 MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-1.5b-instruct-q4_k_m.gguf"
 SERVER_URL = "http://127.0.0.1:8080"
 SERVER_LOG = Path(__file__).parent / ".server.log"
+
+# Không set thì llama-server mặc định dùng context tối đa của model (32768 với
+# Qwen2.5), cấp KV-cache cho toàn bộ 32k token dù prompt thật chỉ ~200-400
+# token (1 snippet + n_predict=80). Từng nghĩ đây là nguyên nhân chính gây
+# swap - thực ra gốc rễ thọt nặng là OneUI hạ cpuset khi Termux chạy nền
+# (xem README), nhưng vẫn giữ ctx nhỏ vì không có lý do gì cấp dư.
+CTX_SIZE = 3072
+
+# Số slot song song trong llama-server - adaptive.py dùng để xử lý nhiều link
+# đồng thời (thay vì tuần tự) khi cần nhiều link/vote để tune với câu hỏi khó.
+# Với foreground + wake-lock, CPU không còn là nút cổ chai chính nên tăng lên
+# vẫn an toàn; CTX_SIZE=3072 chia cho 3 slot còn ~1024 token/slot, đủ nhiều
+# so với prompt thật.
+N_PARALLEL = 3
 
 # "synth": model được phép ghép câu, miễn bám sát snippet (như trợ lý hỏi-đáp).
 # "extract": model chỉ được copy nguyên văn một đoạn trong snippet, không diễn
@@ -73,28 +88,45 @@ def _stop_server() -> None:
         time.sleep(0.3)
 
 
-def ensure_server(startup_timeout: float = 60) -> None:
-    if _server_ready():
-        # Server đang chạy có thể là của một lần gọi trước với model khác -
-        # phải kiểm tra khớp MODEL_PATH, không thì âm thầm benchmark nhầm model.
-        if _loaded_model_path() == str(MODEL_PATH):
-            return
-        _stop_server()
+_ensure_server_lock = threading.Lock()
 
-    log = SERVER_LOG.open("w")
-    subprocess.Popen(
-        # -np 1: mọi lời gọi trong pipeline này tuần tự, không có ích khi giữ
-        # nhiều slot KV cache song song (default auto ăn thêm RAM không cần
-        # thiết, đã thấy góp phần vào RAM pressure/swap trên máy này).
-        ["llama-server", "-m", str(MODEL_PATH), "--host", "127.0.0.1", "--port", "8080", "-np", "1"],
-        stdout=log, stderr=log, start_new_session=True,
-    )
-    deadline = time.monotonic() + startup_timeout
-    while time.monotonic() < deadline:
+
+def ensure_server(startup_timeout: float = 60) -> None:
+    # adaptive.py gọi run_model() (=> ensure_server()) từ nhiều thread song
+    # song - không khóa thì nhiều thread cùng thấy server chưa sẵn sàng và
+    # cùng tự Popen llama-server, 2 process giành 1 port (đã thấy log lẫn
+    # "couldn't bind" + model load chồng nhau, 1 request bị trễ 18s vô lý).
+    # Khóa cả hàm: sau khi server đã warm, mỗi lần gọi chỉ là 1 GET /health
+    # rẻ, không đáng để tối ưu ra khỏi lock.
+    with _ensure_server_lock:
+        # Android hạ xung cụm core "big" cho app chạy nền (Termux không phải
+        # app foreground) - đã đo được gen_tps rơi từ ~27 tok/s xuống
+        # 0.17 tok/s (thấy nhầm là do RAM). termux-wake-lock giữ CPU không bị
+        # Doze/background throttle. Gọi lại vẫn an toàn nếu đã lock rồi.
+        subprocess.run(["termux-wake-lock"], check=False)
+
         if _server_ready():
-            return
-        time.sleep(0.5)
-    raise RuntimeError(f"llama-server không sẵn sàng sau {startup_timeout}s, xem {SERVER_LOG}")
+            # Server đang chạy có thể là của một lần gọi trước với model khác
+            # - phải kiểm tra khớp MODEL_PATH, không thì âm thầm benchmark
+            # nhầm model.
+            if _loaded_model_path() == str(MODEL_PATH):
+                return
+            _stop_server()
+
+        log = SERVER_LOG.open("w")
+        subprocess.Popen(
+            [
+                "llama-server", "-m", str(MODEL_PATH), "--host", "127.0.0.1", "--port", "8080",
+                "-np", str(N_PARALLEL), "-c", str(CTX_SIZE),
+            ],
+            stdout=log, stderr=log, start_new_session=True,
+        )
+        deadline = time.monotonic() + startup_timeout
+        while time.monotonic() < deadline:
+            if _server_ready():
+                return
+            time.sleep(0.5)
+        raise RuntimeError(f"llama-server không sẵn sàng sau {startup_timeout}s, xem {SERVER_LOG}")
 
 
 def build_user_prompt(question: str, snippets: list[dict]) -> str:

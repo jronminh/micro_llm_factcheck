@@ -4,21 +4,31 @@ lặp lại trên cùng một context gộp), đa dạng ở đây đến từ n
 nhiều link độc lập cùng cho ra một câu trả lời, đó là tín hiệu đối chiếu chéo
 thật, không phải nhiễu ngẫu nhiên của model.
 
-Xử lý tuần tự từng link, kiểm tra đồng thuận sau mỗi link (early-stop khi đạt
-ngưỡng) để không lãng phí lượt gọi model khi đã đủ tin cậy sớm.
+Xử lý theo batch N_PARALLEL link cùng lúc (khớp số slot của llama-server),
+kiểm tra đồng thuận sau mỗi batch (early-stop khi đạt ngưỡng) để không lãng
+phí lượt gọi model khi đã đủ tin cậy sớm. Trong 1 batch không có early-stop
+giữa batch - đã gửi hết batch thì đợi hết batch mới check, đổi lại tốc độ
+~N_PARALLEL lần so với tuần tự khi cần đi hết hoặc gần hết max_n link.
 
 Các tham số (max_n, consensus_threshold, min_votes, timeout_s) chưa có con số
 hợp lý - đang trong giai đoạn tune bằng benchmark thực tế.
+
+n_predict=80 (thay vì default 200 của run_model): mode extract chỉ cần copy
+một câu/cụm ngắn, không cần sinh dài. Quan sát qua benchmark: các câu trả
+lời tệ nhất (rambling, tính toán sai) đều là lúc model sinh dài - cắt ngắn
+n_predict vừa nhanh hơn (bottleneck là gen_tps, không phải prompt_tps) vừa
+ép model dừng trước khi rambling ra khỏi phạm vi trích xuất.
 """
 import hashlib
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
 from pathlib import Path
 
 import requests
 
-from pipeline import build_user_prompt, run_model
+from pipeline import N_PARALLEL, build_user_prompt, run_model
 from score import score_answer
 from search import search
 
@@ -29,8 +39,11 @@ from search import search
 CACHE_PATH = Path(__file__).parent / ".link_cache.json"
 
 
-def _cache_key(question: str, snippet: dict) -> str:
-    raw = question + "||" + (snippet.get("url") or snippet.get("snippet", ""))
+def _cache_key(question: str, snippet: dict, n_predict: int, temperature: float) -> str:
+    # n_predict/temperature ảnh hưởng trực tiếp đến answer sinh ra - phải nằm
+    # trong key, nếu không đổi tham số này sẽ âm thầm trả về answer cache từ
+    # lần tune trước với n_predict/temperature khác.
+    raw = f"{question}||{n_predict}||{temperature}||{snippet.get('url') or snippet.get('snippet', '')}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -80,13 +93,37 @@ def _best_cluster_result(question: str, answers: list[tuple[str, str]], cluster_
     return {"answer": representative, "agreement": len(top) / len(answers)}
 
 
+def _process_link(
+    question: str, snippet: dict, n_predict: int, temperature: float, per_link_timeout_s: float,
+) -> tuple[str, str, float] | None:
+    """Gọi model cho 1 link, chạy trong thread riêng - trả None nếu timeout/lỗi.
+
+    Không đụng vào `cache` dict (đọc/ghi cache chỉ làm ở main thread, sau khi
+    join batch) để tránh race condition khi nhiều thread chạy đồng thời.
+    """
+    user_prompt = build_user_prompt(question, [snippet])
+    t0 = time.monotonic()
+    try:
+        result = run_model(
+            user_prompt, mode="extract_unconditional", temperature=temperature,
+            n_predict=n_predict, timeout=per_link_timeout_s,
+        )
+    except requests.exceptions.RequestException:
+        return None
+    elapsed = time.monotonic() - t0
+    answer = result["answer"]
+    verdict = score_answer(question, answer, [snippet])["verdict"]
+    return answer, verdict, elapsed
+
+
 def answer_question_per_link(
     question: str,
     max_n: int = 8,
-    consensus_threshold: float = 0.6,
+    consensus_threshold: float = 0.75,
     cluster_sim_threshold: float = 0.7,
-    min_votes: int = 3,
+    min_votes: int = 4,
     temperature: float = 0.0,
+    n_predict: int = 80,
     per_link_timeout_s: float = 20,
     timeout_s: float = 90,
     use_cache: bool = True,
@@ -101,49 +138,57 @@ def answer_question_per_link(
     answers: list[tuple[str, str]] = []
     used_snippets: list[dict] = []  # song song với answers - chỉ chứa link thật sự có kết quả
 
-    for idx, snippet in enumerate(snippets, start=1):
+    for batch_start in range(0, len(snippets), N_PARALLEL):
         if time.monotonic() >= deadline:
             if debug:
-                print(f"[debug] hết timeout_s={timeout_s}s trước link {idx}, dừng", flush=True)
+                print(f"[debug] hết timeout_s={timeout_s}s trước link {batch_start + 1}, dừng", flush=True)
             break
+        batch = list(enumerate(snippets[batch_start:batch_start + N_PARALLEL], start=batch_start + 1))
 
-        key = _cache_key(question, snippet)
-        cached = cache.get(key) if use_cache else None
-        if cached:
-            answer, verdict = cached["answer"], cached["verdict"]
-            if debug:
-                print(f"[debug] link {idx}/{len(snippets)} (cache) verdict={verdict}: {answer[:80]!r}", flush=True)
-        else:
-            user_prompt = build_user_prompt(question, [snippet])
-            t0 = time.monotonic()
-            try:
-                # Timeout riêng từng link - adaptive nghĩa là còn nhiều link
-                # khác để thử, không đáng đợi một link chậm bất thường (đã
-                # thấy outlier 70s+ do RAM pressure trên máy này).
-                result = run_model(
-                    user_prompt, mode="extract_unconditional", temperature=temperature,
-                    timeout=per_link_timeout_s,
-                )
-            except requests.exceptions.RequestException as exc:
+        to_run = []  # (idx, snippet, key) - phần không có cache, phải gọi model
+        for idx, snippet in batch:
+            key = _cache_key(question, snippet, n_predict, temperature)
+            cached = cache.get(key) if use_cache else None
+            if cached:
+                answer, verdict = cached["answer"], cached["verdict"]
+                answers.append((answer, verdict))
+                used_snippets.append(snippet)
                 if debug:
-                    print(f"[debug] link {idx}/{len(snippets)} bỏ qua (timeout/lỗi: {exc})", flush=True)
-                continue
-            elapsed = time.monotonic() - t0
-            answer = result["answer"]
-            verdict = score_answer(question, answer, [snippet])["verdict"]
-            if use_cache:
-                cache[key] = {"answer": answer, "verdict": verdict}
-                _save_cache(cache)
-            if debug:
-                preview = answer[:80].replace("\n", " ")
-                print(
-                    f"[debug] link {idx}/{len(snippets)} ({elapsed:.1f}s) verdict={verdict} "
-                    f"src={snippet.get('title', '')[:50]!r}\n         -> {preview!r}",
-                    flush=True,
-                )
+                    print(f"[debug] link {idx}/{len(snippets)} (cache) verdict={verdict}: {answer[:80]!r}", flush=True)
+            else:
+                to_run.append((idx, snippet, key))
 
-        answers.append((answer, verdict))
-        used_snippets.append(snippet)
+        if to_run:
+            with ThreadPoolExecutor(max_workers=len(to_run)) as executor:
+                futures = {
+                    executor.submit(_process_link, question, snippet, n_predict, temperature, per_link_timeout_s):
+                        (idx, snippet, key)
+                    for idx, snippet, key in to_run
+                }
+                for future in as_completed(futures):
+                    idx, snippet, key = futures[future]
+                    result = future.result()
+                    if result is None:
+                        if debug:
+                            print(f"[debug] link {idx}/{len(snippets)} bỏ qua (timeout/lỗi)", flush=True)
+                        continue
+                    answer, verdict, elapsed = result
+                    if use_cache:
+                        cache[key] = {"answer": answer, "verdict": verdict}
+                    answers.append((answer, verdict))
+                    used_snippets.append(snippet)
+                    if debug:
+                        preview = answer[:80].replace("\n", " ")
+                        print(
+                            f"[debug] link {idx}/{len(snippets)} ({elapsed:.1f}s) verdict={verdict} "
+                            f"src={snippet.get('title', '')[:50]!r}\n         -> {preview!r}",
+                            flush=True,
+                        )
+            if use_cache:
+                # Ghi 1 lần sau khi cả batch join xong (main thread, không có
+                # thread nào khác đụng vào `cache` dict) - tránh race condition
+                # và giảm I/O so với ghi mỗi link.
+                _save_cache(cache)
 
         if len(answers) < min_votes:
             continue

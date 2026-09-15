@@ -169,12 +169,92 @@ không phải vấn đề prompt engineering.
 "dân số hà nội 2026") hoạt động tốt ở cả 2 mode — đúng với việc dùng model
 gần với một search engine thật.
 
+## Tune adaptive.py với câu hỏi khó (0.5B)
+
+`explore_adaptive.py` chạy 8 câu hỏi khó hơn mức đã test trước đó qua
+`answer_question_per_link`: multi-hop (cần suy luận địa lý 2 bước), số liệu
+biến động (giá vàng), so sánh cần tính toán, tin gần đây, phủ định + kiến
+thức cần cập nhật, câu nên bị từ chối (riêng tư), tính toán nhiều mệnh đề
+theo thời gian, và một câu tiếng Anh phức tạp. Chạy trên máy này cần
+Termux ở foreground (xem lưu ý CPU throttling ở trên) - lúc đó tốc độ ổn
+định 3-46s/câu, không còn timeout 20s.
+
+Kết quả ban đầu (`consensus_threshold=0.6`, `min_votes=3`): 3/8 câu
+**"confident" nhưng sai** - nguy hiểm nhất với một tool tự nhận là
+"fact-check":
+
+- "Thủ đô nước láng giềng phía bắc VN?" -> "Lào" (đúng là Trung Quốc; Lào ở
+  phía Tây/Tây Nam) - agreement 0.67.
+- "Anh/Pháp/Thụy Điển, nước nào không thuộc NATO?" -> "Anh" (thực ra sau
+  2024 cả 3 đều thuộc NATO - câu hỏi test có premise lỗi thời, nhưng model
+  cũng không phát hiện ra) - agreement 0.67.
+- "GDP đầu người 2025 so với 2015 tăng mấy lần?" -> chia sai, lấy USD chia
+  cho **năm** (2015) thay vì GDP năm 2015 - agreement 0.6, đúng ngay ngưỡng.
+
+Tăng `consensus_threshold` lên 0.75 và `min_votes` lên 4, chạy lại: case
+GDP (lỗi tính toán ngẫu nhiên giữa các lần sinh) biến mất - đúng như dự
+đoán, ngưỡng chặt hơn triệt tiêu được sự đồng thuận ngẫu nhiên. Nhưng 2
+case địa lý/NATO **vẫn confident=True và vẫn sai** - agreement chạm đúng
+0.75 vì nhiều nguồn/lần sinh cùng lặp lại một lỗi giống nhau một cách có hệ
+thống (echo chamber giữa các trang SEO tiếng Việt copy nhau, hoặc model
+liên tục nhầm cùng một kiểu địa lý).
+
+**Kết luận quan trọng**: agreement/consensus voting chỉ triệt tiêu được sai
+số *ngẫu nhiên, độc lập giữa các lần sinh* (như lỗi tính toán GDP) - không
+triệt tiêu được sai số *có hệ thống, tương quan giữa các nguồn* (nhiều
+nguồn cùng sai theo cùng một cách). Đây là giới hạn toán học của voting
+theo đa số (majority voting không khử được correlated error), không phải
+bug tham số - tăng threshold/min_votes cao hơn nữa cũng không chắc giải
+quyết được nếu lỗi lặp lại ở >75% nguồn. Câu hỏi tốt tin: các case
+"không đồng thuận" (giá vàng, so sánh Eiffel/Tokyo, Nobel 2026 - model bịa
+"Nguyễn Thị Minh Khai", câu riêng tư, câu tiếng Anh) đều đúng bị đánh
+`confident=False`, đúng ý thiết kế.
+
+Đã cập nhật default trong `adaptive.py`: `consensus_threshold=0.75`,
+`min_votes=4` (giữ - vẫn có ích cho lỗi ngẫu nhiên dù không phải toàn bộ
+giải pháp).
+
+### Đẩy đến giới hạn: mở rộng max_n/min_votes/threshold có cứu được 2 case còn sai không?
+
+Thêm xử lý song song theo batch (`N_PARALLEL=3` link/lúc, `llama-server -np 3`,
+`-c 3072`) để chạy được `max_n` lớn trong thời gian hợp lý - phát hiện kèm 1
+race condition thật: `ensure_server()` không thread-safe, nhiều thread cùng
+gọi lúc server chưa sẵn sàng sẽ cùng tự Popen process mới, giành port. Đã
+khóa bằng `threading.Lock`.
+
+Chạy lại 3 câu hỏi còn sai với điều kiện khắc khe hơn nhiều:
+`max_n=15` (search trả 10), `min_votes=8`, `consensus_threshold=0.85`:
+
+- **Multi-hop** ("thủ đô nước láng giềng phía bắc VN?"): đi qua 9 link,
+  agreement **tăng lên 0.89** (v.11 test ở n nhỏ chỉ 0.67) - "Lào" vẫn sai,
+  nhưng tự tin hơn. Soi nội dung: 5/9 nguồn nói "Lào", 3/9 nói "Hà Nội"
+  (cũng sai), chỉ 1/9 nói đúng "Trung Quốc". Nhiều trang giáo án/SEO tiếng
+  Việt cùng lặp lại một lỗi giống nhau (có vẻ từ cùng dạng bài địa lý lớp 5)
+  - mở rộng search không cứu được vì lỗi nằm ở corpus bị lệch, không phải
+  ở model hay ở tham số voting.
+- **NATO**: agreement giảm xuống 0.40 (đúng, hết confident) - nguồn chia
+  phe ~50/50 giữa "Anh" và "Thụy Điển" (khác nhau do bài viết cũ/mới, lỗi
+  độc lập giữa nguồn, không phải cùng một lỗi lặp lại).
+- **GDP**: vẫn confident=False (0.40) như ở lần tune trước, thêm lộ ra 2/10
+  nguồn cho đáp án khác hẳn ("tăng 7 lần") - tín hiệu bổ sung chưa khai thác.
+
+**Kết luận quan trọng nhất**: hệ thống không phân biệt được "đồng thuận vì
+đúng" và "đồng thuận vì nhiều nguồn cùng lặp lại một lỗi giống nhau". Mở
+rộng max_n/min_votes/threshold chỉ giúp khi lỗi ngẫu nhiên/độc lập giữa
+nguồn (case NATO, GDP) - khi lỗi mang tính hệ thống ở cấp corpus search
+(case multi-hop), mở rộng tìm kiếm có thể khiến kết luận sai tự tin hơn,
+phản trực giác. Đây là giới hạn kiến trúc thật của "search + voting" với
+model nhỏ, không phải bug tham số - cần một cơ chế khác (ví dụ: đối chiếu
+với nguồn có uy tín cao hơn, hoặc phát hiện câu hỏi dạng multi-hop để hạ
+tin cậy mặc định) nếu muốn giải quyết, không chỉ chỉnh số.
+
 ## Trạng thái
 
 Bản chạy được đầu tiên hoàn chỉnh: search + model (server warm) + benchmark
 ghi log. Đã test: 8 câu hỏi đa dạng lĩnh vực với 1.5B; so sánh tốc độ 1.5B
 vs 0.5B; tiếng Anh vs tiếng Việt; 8 dạng câu hỏi khác nhau ở 2 mode prompt
-(synth/extract) với 0.5B.
+(synth/extract) với 0.5B; tune `adaptive.py` (per-link consensus) với 8 câu
+hỏi khó hơn.
 
 Phát hiện quan trọng nhất: **ép model nhỏ chỉ được "search, không được suy
 luận" theo nghĩa chặt (mode extract) làm giảm độ tin cậy so với cho nó
@@ -182,7 +262,14 @@ tổng hợp nhẹ (mode synth)** — 0.5B không đủ khả năng theo instruc
 điều kiện phức tạp một cách ổn định. Đây ngược với giả định ban đầu của ý
 tưởng, và là giới hạn thật của quy mô model, không phải vấn đề prompt.
 
+Phát hiện thứ hai (từ tune adaptive.py): **consensus voting giữa nhiều
+nguồn/lần sinh chỉ khử được lỗi ngẫu nhiên, không khử được lỗi hệ thống
+lặp lại giống nhau giữa các nguồn** - "confident" không đồng nghĩa "đúng"
+ở các câu multi-hop hoặc dùng kiến thức có thể lỗi thời.
+
 Bước tiếp theo hợp lý: thử mode extract với model 1.5B (có tuân theo
 instruction có điều kiện tốt hơn không?); chạy nhiều câu hỏi hơn để xác
 nhận tương quan RAM pressure/chất lượng câu trả lời; thử câu hỏi tiếng
-Anh/Việt với n lớn hơn để kết luận chắc về sự khác biệt ngôn ngữ.
+Anh/Việt với n lớn hơn để kết luận chắc về sự khác biệt ngôn ngữ; thử lại
+2 case multi-hop/NATO còn sai với model 1.5B để xem lỗi có phải do quy mô
+model hay do search/snippet chất lượng thấp.
