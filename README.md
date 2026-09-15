@@ -430,6 +430,51 @@ với `max_n=50, consensus_threshold=0.80` (thay vì 8/0.75 mặc định):
   nguồn, đúng loại vấn đề "corpus lệch" đã ghi nhận trước đó, không phải bug
   cơ chế.
 
+## Build llama.cpp từ source: bật dotprod/i8mm bị bỏ phí
+
+Câu hỏi ban đầu: máy này (Samsung SM-S7110, chip Qualcomm SM8450/Snapdragon 8
+Gen 1) có trick nào giống cách Claude Code chạy trên Termux (glibc-runner vá
+ELF interpreter để chạy binary glibc trên Bionic) không? Kiểm tra thì không -
+`llama-server` cài qua `pkg install` đã là native Bionic build sẵn
+(`built with Clang for Android aarch64`), không có mismatch ABI nào để vá.
+
+Nhưng tìm ra một vấn đề khác thật: gọi thẳng các hàm `ggml_cpu_has_*()`
+trong `libggml-cpu.so` (qua Python `ctypes`, không cần build gì để kiểm tra)
+thấy `dotprod` và `matmul_int8` (= i8mm) đều trả `0`, dù `/proc/cpuinfo` của
+máy có đủ 2 feature này (`asimddp`, `i8mm`). Trên ARM, ggml không
+runtime-dispatch kernel theo CPU như x86 - phải bật `-march=...+dotprod+i8mm`
+lúc compile. Bản `pkg install` của Termux build generic (không chạy trên
+đúng chip đích lúc build) nên không bật được.
+
+Build lại từ source ngay trên máy (`cmake -B build -G Ninja
+-DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF`, giữ
+`GGML_NATIVE=ON` mặc định) sửa được việc này: `GGML_NATIVE=ON` tự compile và
+**chạy thử thật** một đoạn code dùng lệnh `vdotq_s32`/`vmmlaq_s32` ngay trên
+CPU đang build (`check_cxx_source_runs`) - vì build trực tiếp trên chip đích,
+test này pass, bật đúng `dotprod`+`i8mm`. Verify lại bằng `ctypes`:
+`ggml_cpu_has_dotprod`/`_matmul_int8` chuyển từ `0` sang `1`.
+
+Đo bằng `llama-bench` (cùng model 0.5B, cùng máy, `-t 4`):
+
+| | pp128 (t/s) | tg64 (t/s) |
+|---|---|---|
+| Bản `pkg install` (generic) | 71.91 | 39.75 |
+| Bản build từ source (dotprod+i8mm) | 90.75 (+26%) | 46.70 (+17%) |
+
+`pipeline.py` trỏ thẳng `LLAMA_SERVER_BIN` sang binary build mới
+(`~/vendor/llama.cpp/build/bin/llama-server`, nằm ngoài repo và ngoài
+`$PREFIX` của Termux) thay vì bản trên `PATH` - không đè lên gói do `pkg`
+quản lý, dễ rollback (đổi lại hằng số là xong) nếu `pkg upgrade` sau này
+đổi ABI/version không tương thích.
+
+Đã khảo sát nhưng loại bỏ vì không đáng công cho dự án này: GPU offload qua
+OpenCL (Adreno 730 trên chip này chỉ "được ghi nhận là chạy được", chưa
+verify chính thức - Adreno 750/830 trở lên mới được hỗ trợ chính thức; phải
+ép KV-cache về f16, tắt flash-attention, dễ OOM RAM khi kết hợp `--mlock`);
+Hexagon NPU (SM8450 chính thức "không được Qualcomm hỗ trợ" cho LLM NPU, dự
+án cộng đồng khả dụng duy nhất dùng ExecuTorch `.pte` - khác hoàn toàn
+toolchain GGUF/`llama-server` đang dùng, phải export lại model từ đầu).
+
 ## Trạng thái
 
 Bản chạy được đầu tiên hoàn chỉnh: search + model (server warm) + benchmark
@@ -440,7 +485,8 @@ hỏi khó hơn; khảo sát phân rã câu hỏi multi-hop trước khi search 
 chốt ở quy tắc thuần regex+POS); nối vào `chain.py` (search+extract theo
 từng câu hỏi con, có cổng confidence + fork `adaptive_entity.py` cho bridge
 entity, xem 2 mục trên) - chạy được, chưa nối vào pipeline chính, chưa có
-bước tổng hợp câu trả lời cuối.
+bước tổng hợp câu trả lời cuối; build lại `llama-server` từ source để bật
+`dotprod`/`i8mm` bị bản `pkg install` bỏ phí (+17-26% t/s, xem mục trên).
 
 Phát hiện quan trọng nhất: **ép model nhỏ chỉ được "search, không được suy
 luận" theo nghĩa chặt (mode extract) làm giảm độ tin cậy so với cho nó

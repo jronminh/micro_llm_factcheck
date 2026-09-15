@@ -20,6 +20,16 @@ MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-1.5b-instruct-q4_k_m.gg
 SERVER_URL = "http://127.0.0.1:8080"
 SERVER_LOG = Path(__file__).parent / ".server.log"
 
+# Bản llama-server cài qua `pkg install` được build generic (không bật
+# +dotprod+i8mm dù CPU máy này có, xác nhận qua ggml_cpu_has_dotprod()/
+# _matmul_int8() = 0) vì package build không chạy trên chính con chip đích
+# nên không auto-detect được (xem README). Build tay từ source ngay trên máy
+# (GGML_NATIVE=ON tự chạy thử lệnh dotprod/i8mm thật trên CPU) bật được cả
+# hai - đo bằng llama-bench: pp128 71.9->90.8 t/s (+26%), tg64 39.8->46.7 t/s
+# (+17%), cùng model, cùng máy. Dùng thẳng đường dẫn build này thay vì bản
+# pkg trên PATH.
+LLAMA_SERVER_BIN = Path.home() / "vendor" / "llama.cpp" / "build" / "bin" / "llama-server"
+
 # Không set thì llama-server mặc định dùng context tối đa của model (32768 với
 # Qwen2.5), cấp KV-cache cho toàn bộ 32k token dù prompt thật chỉ ~200-400
 # token (1 snippet + n_predict=80). Từng nghĩ đây là nguyên nhân chính gây
@@ -173,7 +183,7 @@ def ensure_server(startup_timeout: float = 60) -> None:
         log = SERVER_LOG.open("w")
         subprocess.Popen(
             [
-                "llama-server", "-m", str(MODEL_PATH), "--host", "127.0.0.1", "--port", "8080",
+                str(LLAMA_SERVER_BIN), "-m", str(MODEL_PATH), "--host", "127.0.0.1", "--port", "8080",
                 "-np", str(N_PARALLEL), "-c", str(CTX_SIZE),
             ],
             stdout=log, stderr=log, start_new_session=True,
