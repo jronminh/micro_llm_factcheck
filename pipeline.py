@@ -26,12 +26,17 @@ SYSTEM_PROMPT = (
 )
 
 
-def ensure_server(startup_timeout: float = 60) -> None:
+def _server_ready() -> bool:
+    # /health trả 503 trong lúc model đang load, 200 khi model sẵn sàng nhận request.
     try:
-        requests.get(f"{SERVER_URL}/health", timeout=1)
-        return
+        return requests.get(f"{SERVER_URL}/health", timeout=1).status_code == 200
     except requests.RequestException:
-        pass
+        return False
+
+
+def ensure_server(startup_timeout: float = 60) -> None:
+    if _server_ready():
+        return
 
     log = SERVER_LOG.open("w")
     subprocess.Popen(
@@ -40,11 +45,9 @@ def ensure_server(startup_timeout: float = 60) -> None:
     )
     deadline = time.monotonic() + startup_timeout
     while time.monotonic() < deadline:
-        try:
-            requests.get(f"{SERVER_URL}/health", timeout=1)
+        if _server_ready():
             return
-        except requests.RequestException:
-            time.sleep(0.5)
+        time.sleep(0.5)
     raise RuntimeError(f"llama-server không sẵn sàng sau {startup_timeout}s, xem {SERVER_LOG}")
 
 

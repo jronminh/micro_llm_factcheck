@@ -116,11 +116,28 @@ Hai quan sát đáng chú ý:
    0.5 t/s trùng với câu trả lời tệ nhất (lặp tiêu đề snippet). Mới quan sát
    được 1 lần, n=8 chưa đủ để khẳng định tương quan, cần thêm dữ liệu.
 
+## So sánh 1.5B vs 0.5B
+
+`compare_models.py` chạy cùng 3 câu hỏi lần lượt trên mỗi model (dừng
+server, đổi model, khởi động lại, để không chạy đồng thời 2 model):
+
+| model | total_s (avg) | gen_tps (avg) |
+|---|---|---|
+| 1.5B | 30.1 | 7.01 |
+| 0.5B | 10.0 | 17.12 |
+
+0.5B nhanh hơn ~2.44x về gen_tps và giảm total_s xuống 1/3. Câu trả lời của
+0.5B với 3 câu hỏi test (Everest, tổng thống Mỹ, Python) vẫn đúng và bám
+sát snippet, không thấy khác biệt rõ về chất lượng ở mức test nhỏ này —
+cần thử nhiều câu hỏi khó hơn (đa bước, số liệu) để thấy giới hạn thật của
+0.5B.
+
 ## Trạng thái
 
 Bản chạy được đầu tiên hoàn chỉnh: search + model (server warm) + benchmark
-ghi log, đã test qua 8 câu hỏi đa dạng lĩnh vực. Model 1.5B chạy được trên
-Termux, prompt grounding hoạt động đúng cả khi có đủ thông tin (trích dẫn
-"[1]") và khi thiếu thông tin (từ chối trả lời). Bước tiếp theo hợp lý:
-chạy nhiều câu hỏi hơn để xác nhận tương quan RAM pressure/chất lượng câu
-trả lời, và/hoặc thử model 0.5B để so sánh.
+ghi log, đã test qua 8 câu hỏi đa dạng lĩnh vực với model 1.5B, và so sánh
+thêm với model 0.5B trên 3 câu hỏi. Prompt grounding hoạt động đúng cả khi
+có đủ thông tin (trích dẫn "[1]") và khi thiếu thông tin (từ chối trả lời).
+Bước tiếp theo hợp lý: chạy nhiều câu hỏi hơn (đặc biệt câu hỏi khó cho
+0.5B) để xác nhận tương quan RAM pressure/chất lượng câu trả lời, và tìm
+điểm 0.5B bắt đầu trả lời sai/kém so với 1.5B.
