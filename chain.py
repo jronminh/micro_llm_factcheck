@@ -80,17 +80,29 @@ if __name__ == "__main__":
 
     pipeline.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
 
+    # 3 câu hỏi khó đã dùng để tune adaptive.py (explore_adaptive.py) mà
+    # decompose.py thực sự tách được (bridge/comparison) - các câu khó khác
+    # trong bộ đó (giá vàng, Nobel, NATO, riêng tư, EN "difference between")
+    # không có cấu trúc của/hơn/so-với nên decompose giữ nguyên, chạy như cũ,
+    # không có gì để test riêng cho chain ở đây.
     QUESTIONS = [
-        "Thủ đô của nước sản xuất nhiều cà phê nhất thế giới là gì?",
-        "Dân số của thành phố lớn nhất Nhật Bản là bao nhiêu?",
+        "Thủ đô của nước láng giềng phía bắc Việt Nam là gì?",
+        "Tháp Eiffel cao hơn tháp Tokyo bao nhiêu mét?",
+        "GDP bình quân đầu người Việt Nam năm 2025 so với năm 2015 tăng bao nhiêu lần?",
     ]
     if len(sys.argv) > 1:
         QUESTIONS = [" ".join(sys.argv[1:])]
 
+    # max_n=50 (thay vì mặc định 8), consensus_threshold=0.80 (thay vì 0.75) -
+    # đẩy câu hỏi khó tới giới hạn: search cho phép nhiều link hơn hẳn, đồng
+    # thời khắt khe hơn khi nhận là confident. timeout_s tăng theo vì 50 link
+    # (~17 batch N_PARALLEL=3) vượt xa timeout_s=90 mặc định.
+    HARD_KWARGS = {"max_n": 50, "consensus_threshold": 0.80, "timeout_s": 900, "debug": True}
+
     pipeline.ensure_server()
     for q in QUESTIONS:
         t0 = time.monotonic()
-        out = answer_chain(q, debug=True)
+        out = answer_chain(q, **HARD_KWARGS)
         elapsed = time.monotonic() - t0
         print(f"\n{'=' * 10} {q} (type={out['type']}, {elapsed:.1f}s) {'=' * 10}")
         for step in out["steps"]:

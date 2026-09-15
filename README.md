@@ -392,6 +392,44 @@ rác Cam-pu-chia/Thái Lan/Việt Nam/1 answer degenerate) nhưng vẫn dưới 
 Việt vẫn lệch, xem phần Tune adaptive.py ở trên), không phải nhiễu do cách
 trích xuất.
 
+### Đẩy chain tới giới hạn: max_n=50, consensus_threshold=0.80
+
+`search.py` trước chỉ lấy được ~10 kết quả (1 trang HTML của DDG, không phân
+trang) - `max_n` lớn hơn 10 vô nghĩa. Thêm phân trang (theo dõi form ẩn DDG
+trả kèm mỗi trang, có offset `s` + token phiên `vqd`, dừng khi đủ `n` hoặc hết
+trang, giới hạn `MAX_PAGES=6` chặn vòng lặp vô hạn) - lấy được 26-30 kết quả
+độc lập (đã dedupe theo url) cho các câu hỏi test, gần chạm `max_n=50` (DDG
+không có đủ 50 kết quả khác nhau cho các câu hỏi này).
+
+Chạy lại 3 câu hỏi khó có thể chain được (bridge "thủ đô nước láng giềng phía
+bắc VN", comparison "Eiffel/Tokyo", comparison-theo-năm "GDP 2025 vs 2015")
+với `max_n=50, consensus_threshold=0.80` (thay vì 8/0.75 mặc định):
+
+- **Mẫu lớn hơn làm agreement giảm đúng hướng ở case vốn đã biết khó**, không
+  tăng giả: case "nước láng giềng phía Bắc VN" agreement 0.50 (n=8) → 0.31
+  (n=29) - `bias`/`content_bias` ở case này đều thấp (~0.11), tức bất đồng
+  đến từ nguồn thật sự độc lập, không phải echo-chamber - mẫu lớn hơn đang
+  phơi bày đúng bất đồng thật, không phải nhiễu định dạng. **Về mặt thống kê
+  đây là dấu hiệu tốt, nhưng chỉ đúng khi lỗi giữa nguồn độc lập/ngẫu nhiên** -
+  README mục "đẩy đến giới hạn" ở trên từng ghi nhận trường hợp ngược lại
+  (agreement tăng sai khi lỗi mang tính hệ thống/echo-chamber, mở rộng search
+  càng vớt thêm bản sao của cùng 1 lỗi gốc) - phải nhìn cả agreement lẫn
+  bias/content_bias cùng nhau, không kết luận chỉ từ n hay agreement một mình.
+- **Case Eiffel/Tokyo lộ ra 1 điểm về cách diễn đạt câu hỏi**: câu test dùng
+  "tháp Tokyo" (không ghi "Skytree" như lần test trước) nên hội tụ đúng về
+  Tokyo Tower (333m, tháp cũ, `confident=True`, agreement 0.83) thay vì Tokyo
+  Skytree (634m, tháp mới) - không phải lỗi hệ thống, chỉ là `decompose.py`
+  cắt nguyên văn thực thể từ câu hỏi gốc, không tự khử nhập nhằng tên. Vế
+  Eiffel agreement giảm còn 0.14 (đi hết 28 link) - chiều cao bị báo lệch
+  nhau nhiều giữa nguồn (300/324/325/330m, tùy có tính ăng-ten).
+- **Case GDP 2025 vs 2015**: vế 2025 đạt ngưỡng nhanh (6 link, agreement 0.83,
+  ra "5.026 USD" nhất quán). Vế 2015 đi hết 30 link vẫn agreement 0.27, và
+  câu trả lời thắng cuộc ("8,9 triệu đồng/người/tháng") **là chỉ số khác hẳn**
+  (thu nhập bình quân/tháng, không phải GDP bình quân đầu người/năm) - nguồn
+  bị lẫn đơn vị/chỉ số, mở rộng max_n không cứu được vì lỗi nằm ở nội dung
+  nguồn, đúng loại vấn đề "corpus lệch" đã ghi nhận trước đó, không phải bug
+  cơ chế.
+
 ## Trạng thái
 
 Bản chạy được đầu tiên hoàn chỉnh: search + model (server warm) + benchmark
