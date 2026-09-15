@@ -36,6 +36,15 @@ SYSTEM_PROMPTS = {
         "trực tiếp yêu cầu. Chỉ in ra đúng đoạn đó, không gì khác. Nếu không có đoạn "
         "nào phù hợp, in ra đúng một từ: KHONG_CO."
     ),
+    # Bỏ nhánh "nếu không có thì in KHONG_CO" - README ghi nhận model nhỏ theo
+    # instruction có điều kiện không ổn định. Quyết định "có đủ thông tin hay
+    # không" chuyển sang Python, qua đồng thuận giữa nhiều lần sinh (adaptive.py).
+    "extract_unconditional": (
+        "Bạn là một công cụ tìm kiếm, không phải trợ lý hội thoại. Nhiệm vụ duy nhất: "
+        "tìm trong các đoạn trích dưới đây một câu hoặc cụm từ NGUYÊN VĂN (copy chính "
+        "xác từng chữ, không viết lại, không thêm từ nối, không giải thích) trả lời "
+        "trực tiếp yêu cầu. Chỉ in ra đúng đoạn đó, không gì khác."
+    ),
 }
 
 
@@ -74,7 +83,10 @@ def ensure_server(startup_timeout: float = 60) -> None:
 
     log = SERVER_LOG.open("w")
     subprocess.Popen(
-        ["llama-server", "-m", str(MODEL_PATH), "--host", "127.0.0.1", "--port", "8080"],
+        # -np 1: mọi lời gọi trong pipeline này tuần tự, không có ích khi giữ
+        # nhiều slot KV cache song song (default auto ăn thêm RAM không cần
+        # thiết, đã thấy góp phần vào RAM pressure/swap trên máy này).
+        ["llama-server", "-m", str(MODEL_PATH), "--host", "127.0.0.1", "--port", "8080", "-np", "1"],
         stdout=log, stderr=log, start_new_session=True,
     )
     deadline = time.monotonic() + startup_timeout
@@ -92,18 +104,27 @@ def build_user_prompt(question: str, snippets: list[dict]) -> str:
     return f"Đoạn trích:\n{context}\n\nCâu hỏi: {question}"
 
 
-def run_model(user_prompt: str, mode: str = "synth", n_predict: int = 200) -> dict:
+def run_model(
+    user_prompt: str, mode: str = "synth", n_predict: int = 200,
+    temperature: float | None = None, timeout: float = 300,
+) -> dict:
     ensure_server()
+    payload = {
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPTS[mode]},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_tokens": n_predict,
+    }
+    # None -> giữ nguyên default của llama-server (dùng cho pipeline một-lượt
+    # hiện có). Self-consistency (adaptive.py) cần set > 0 để có đa dạng giữa
+    # các lần sinh, nếu không voting vô nghĩa vì mọi lần sinh sẽ giống hệt nhau.
+    if temperature is not None:
+        payload["temperature"] = temperature
     resp = requests.post(
         f"{SERVER_URL}/v1/chat/completions",
-        json={
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPTS[mode]},
-                {"role": "user", "content": user_prompt},
-            ],
-            "max_tokens": n_predict,
-        },
-        timeout=300,
+        json=payload,
+        timeout=timeout,
     )
     resp.raise_for_status()
     data = resp.json()
