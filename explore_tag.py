@@ -14,11 +14,11 @@ import json
 import re
 from pathlib import Path
 
-import pipeline
+import llm
 from decompose import _needs_lookup
 from explore_decompose import QUESTIONS as BASE_QUESTIONS
 
-pipeline.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+llm.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
 
 EXTRA_QUESTIONS = [
     ("genitive ẩn, không có 'của' (regex bó tay)", "Dân số thành phố lớn nhất Nhật Bản là bao nhiêu?"),
@@ -59,10 +59,10 @@ def assemble(tag: dict) -> list[str] | None:
 
 
 if __name__ == "__main__":
-    pipeline.ensure_server()
+    llm.ensure_server()
     tally = {"valid_json": 0, "invalid": 0}
     for kind, q in QUESTIONS:
-        result = pipeline.run_model(q, mode="tag", temperature=0.0, n_predict=150)
+        result = llm.run_model(q, mode="tag", temperature=0.0, n_predict=150)
         tag = parse_tag(result["answer"])
         tally["valid_json" if tag is not None else "invalid"] += 1
         print(f"[{kind}] {q}")

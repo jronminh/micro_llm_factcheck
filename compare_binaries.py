@@ -1,9 +1,9 @@
 """So sanh end-to-end ban `pkg install` vs ban build tu source cua llama-server
-tren pipeline that (khong phai llama-bench tho, da co so lieu trong README).
+tren llm that (khong phai llama-bench tho, da co so lieu trong README).
 
-Truoc gio LLAMA_SERVER_BIN trong pipeline.py tro san sang build-tu-source va
+Truoc gio LLAMA_SERVER_BIN trong llm.py tro san sang build-tu-source va
 chua tung bi doi qua lai trong 1 lan chay - bug _stop_server() (pkill -x
-khong khop duoc process, xem pipeline.py) co nghia neu doi qua lai truoc day
+khong khop duoc process, xem llm.py) co nghia neu doi qua lai truoc day
 co the da am tham benchmark nham binary cu. Sau khi sua _stop_server()/
 ensure_server() de tu parse ps aux + check ca LLAMA_SERVER_BIN, script nay la
 lan dau so sanh that giua 2 binary tren cau hoi thuc.
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import requests
 
-import pipeline
+import llm
 from thermal import ThermalGuard
 
 RESULTS_CSV = Path(__file__).parent / "benchmark" / "binary_compare.csv"
@@ -56,7 +56,7 @@ def _run_questions(label: str, questions: list[str], guard: ThermalGuard) -> lis
             break
         t0 = time.monotonic()
         try:
-            out = pipeline.answer_question(q)
+            out = llm.answer_question(q)
         except requests.exceptions.RequestException:
             if guard.abort.is_set():
                 print(f"  [{label}] request loi do server bi kill switch dung - bo qua cau con lai")
@@ -85,8 +85,8 @@ def run_phase(phase_name: str, questions: list[str], guard: ThermalGuard) -> lis
             print(f"Bo qua binary {label}: khong thay {bin_path}")
             continue
         print(f"-- binary={label} ({bin_path}) --")
-        pipeline.LLAMA_SERVER_BIN = bin_path
-        pipeline.ensure_server()
+        llm.LLAMA_SERVER_BIN = bin_path
+        llm.ensure_server()
         all_rows.extend(_run_questions(label, questions, guard))
     return all_rows
 

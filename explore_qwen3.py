@@ -1,8 +1,8 @@
 """So sánh Qwen3-0.6B (voi /no_think, xem notes/micro-llm-alternatives-to-qwen.md)
 với Qwen2.5-0.5B trên đúng bộ 8 câu hỏi khó của explore_adaptive.py.
 
-Monkey-patch adaptive.build_user_prompt (không phải pipeline.build_user_prompt
-- adaptive.py đã `from pipeline import build_user_prompt` nên giữ tham chiếu
+Monkey-patch adaptive.build_user_prompt (không phải llm.build_user_prompt
+- adaptive.py đã `from llm import build_user_prompt` nên giữ tham chiếu
 riêng) để nối "/no_think" vào cuối prompt gửi model, KHÔNG đụng vào câu hỏi
 dùng để search (question truyền cho search() và build_user_prompt() là cùng
 1 biến trong adaptive.py - phải patch ở tầng prompt, không phải tầng câu
@@ -12,11 +12,11 @@ import time
 from pathlib import Path
 
 import adaptive
-import pipeline
+import llm
 from adaptive import answer_question_per_link
 from explore_adaptive import QUESTIONS
 
-pipeline.MODEL_PATH = Path(__file__).parent / "models" / "qwen3-0.6b-q4_k_m.gguf"
+llm.MODEL_PATH = Path(__file__).parent / "models" / "qwen3-0.6b-q4_k_m.gguf"
 
 _original_build_user_prompt = adaptive.build_user_prompt
 

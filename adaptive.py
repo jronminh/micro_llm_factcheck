@@ -1,5 +1,5 @@
 """Trích xuất độc lập trên từng link rồi lấy đồng thuận, thay vì một lần gọi
-cố định như pipeline.answer_question(). Khác với self-consistency (sampling
+cố định như llm.answer_question(). Khác với self-consistency (sampling
 lặp lại trên cùng một context gộp), đa dạng ở đây đến từ nguồn khác nhau: nếu
 nhiều link độc lập cùng cho ra một câu trả lời, đó là tín hiệu đối chiếu chéo
 thật, không phải nhiễu ngẫu nhiên của model.
@@ -30,8 +30,8 @@ from urllib.parse import urlparse
 
 import requests
 
-import pipeline
-from pipeline import N_PARALLEL, build_user_prompt, run_model
+import llm
+from llm import N_PARALLEL, build_user_prompt, run_model
 from score import _words, score_answer
 from search import search
 
@@ -61,7 +61,7 @@ def _cache_key(question: str, snippet: dict, n_predict: int, temperature: float)
     # âm thầm trả lại answer dạng cũ (mảnh trích nguyên văn) từ cache, không
     # phải câu khẳng định chuẩn hóa mới.
     raw = (
-        f"{question}||{n_predict}||{temperature}||{pipeline.MODEL_PATH}||{_MODE}||"
+        f"{question}||{n_predict}||{temperature}||{llm.MODEL_PATH}||{_MODE}||"
         f"{snippet.get('url') or snippet.get('snippet', '')}"
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -191,15 +191,19 @@ def _best_cluster_result(
     question: str, answers: list[tuple[str, str]], snippets: list[dict],
     cluster_sim_threshold: float, content_sim_threshold: float,
 ) -> dict | None:
-    # Mẫu degenerate ("[2]", rỗng...) và off_topic (claim_match thấp - đúng
-    # chủ đề nhưng lệch sự kiện so với câu hỏi, xem _process_link) không
-    # tham gia cluster - nếu không, nhiều lần degenerate giống hệt nhau có
-    # thể thắng đồng thuận dù không có nội dung thật, hoặc off_topic (vốn
-    # được đánh dấu chính là để loại khỏi đồng thuận) vẫn lọt vào vote như
-    # bình thường, vô hiệu hóa mục đích của claim_match. snippets phải lọc
-    # song song với answers để giữ đúng chỉ số khi tính domain của cluster
-    # thắng (bias).
-    usable = [(a, v, s) for (a, v), s in zip(answers, snippets) if v not in ("degenerate", "off_topic")]
+    # Chỉ "meaningful" mới được vote - không liệt kê loại trừ từng verdict xấu
+    # (degenerate/off_topic/echo/title_echo/ungrounded/refusal) vì bản chất
+    # đây là whitelist, không phải blacklist: mọi verdict không phải
+    # "meaningful" đều là model không trả lời được câu hỏi thật, dù lý do khác
+    # nhau. Trước đây chỉ loại degenerate+off_topic, bỏ sót echo/title_echo -
+    # đo thực tế (probe_process_link) lộ ra đây không phải lỗi hiếm: với câu
+    # hỏi số liệu biến động (dân số...), các giá trị ĐÚNG khác nhau tuyệt đối
+    # giữa nguồn (mỗi giá trị tự thành cụm cỡ 1), trong khi câu echo (model
+    # lặp lại câu hỏi) lại giống nhau về văn bản nên dễ gộp cụm lớn hơn - cụm
+    # rác thắng cụm đúng một cách có cấu trúc, không phải ngẫu nhiên. snippets
+    # phải lọc song song với answers để giữ đúng chỉ số khi tính domain của
+    # cluster thắng (bias).
+    usable = [(a, v, s) for (a, v), s in zip(answers, snippets) if v == "meaningful"]
     if not usable:
         return None
     texts = [a for a, _, _ in usable]
@@ -242,6 +246,45 @@ def _question_relevance(question: str, snippet: dict) -> float:
     return len(q_words & s_words) / len(q_words)
 
 
+_TIME_SENSITIVE_RE = re.compile(
+    r"hôm nay|hiện nay|hiện tại|mới nhất|năm nay|bây giờ|gần đây", re.IGNORECASE,
+)
+
+_DATE_PATTERNS = (
+    re.compile(r"ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(\d{4})"),
+    re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})"),
+    re.compile(r"tháng\s+(\d{1,2})[/\s]năm\s+(\d{4})"),
+    re.compile(r"tháng\s+(\d{1,2})/(\d{4})"),
+    re.compile(r"năm\s+(\d{4})"),
+)
+
+
+def _is_time_sensitive(question: str) -> bool:
+    return bool(_TIME_SENSITIVE_RE.search(question))
+
+
+def _has_freshness_signal(snippet: dict) -> bool:
+    """True nếu title+snippet có nhắc một ngày/tháng/năm cụ thể (2000-2027) -
+    proxy thô cho "trang có nội dung cập nhật thật", không phải "trang mới
+    nhất". Chỉ dùng để LỌC (bỏ trang không có ngày nào) cho câu hỏi
+    time-sensitive, KHÔNG dùng để tự chọn số nào đúng - đo thực nghiệm
+    (probe_freshness.py) cho thấy tự trích số theo ngày gần nhất dễ bắt nhầm
+    (vd "năm 2024" bị đọc thành number=2024 thay vì số liệu thật trong câu
+    khác) - việc chọn số vẫn phải qua model (claim), xem [[adaptive-evaluation-matrix]].
+
+    Case thật (giá vàng hôm nay): 6/8 trang landing page tĩnh không có ngày
+    nào trong snippet DDG, và đúng là 6 trang đó cũng không có số giá thật -
+    lọc trước khi gọi model tiết kiệm được lượt gọi trên trang chắc chắn hỏng.
+    """
+    text = f"{snippet.get('title', '')} {snippet.get('snippet', '')}"
+    for pattern in _DATE_PATTERNS:
+        for m in pattern.finditer(text):
+            year = int(m.groups()[-1])  # năm luôn là group cuối trong mọi pattern trên
+            if 2000 <= year <= 2027:
+                return True
+    return False
+
+
 _QUESTION_PARTICLES = ("bao nhiêu", "là gì", "?")
 
 
@@ -249,7 +292,7 @@ def _skeleton(text: str) -> str:
     """Bỏ số và các cụm nghi vấn - còn lại "khung câu" (chủ ngữ-vị ngữ, không
     giá trị) để so 2 câu khẳng định có cùng khung không, bất kể giá trị khác
     nhau. Dùng chung cho cả question và claim để so công bằng (2 vế cùng
-    dạng khẳng định, xem pipeline.py mode "extract_claim")."""
+    dạng khẳng định, xem llm.py mode "extract_claim")."""
     t = text.lower()
     t = re.sub(r"\d+([.,]\d+)?", "", t)
     for p in _QUESTION_PARTICLES:
@@ -323,6 +366,22 @@ def answer_question_per_link(
     snippets = [s for s, rel in scored if rel >= relevance_threshold]
     if debug:
         print(f"[debug] còn {len(snippets)}/{len(scored)} link sau lọc relevance >= {relevance_threshold}", flush=True)
+
+    # Câu hỏi time-sensitive ("hôm nay", "mới nhất"...): loại thêm snippet
+    # không có ngày/tháng/năm cụ thể nào - đo thực nghiệm (probe_freshness.py,
+    # case "giá vàng hôm nay") cho thấy các trang này thường là landing page
+    # tĩnh không có số thật, gọi model chỉ tốn lượt mà không ra gì. Không áp
+    # dụng nếu lọc sạch hết (thà thử trên link "có thể hỏng" còn hơn không
+    # còn link nào) - xem _has_freshness_signal.
+    if _is_time_sensitive(question):
+        fresh = [s for s in snippets if _has_freshness_signal(s)]
+        if debug:
+            print(
+                f"[debug] time-sensitive: {len(fresh)}/{len(snippets)} link có tín hiệu ngày cụ thể",
+                flush=True,
+            )
+        if fresh:
+            snippets = fresh
 
     cache = _load_cache() if use_cache else {}
     answers: list[tuple[str, str]] = []
@@ -434,10 +493,10 @@ def answer_question_per_link(
 if __name__ == "__main__":
     import sys
 
-    import pipeline
+    import llm
 
     # Model nhỏ hơn để lặp tham số nhanh hơn khi chưa có con số hợp lý.
-    pipeline.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+    llm.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
 
     q = " ".join(sys.argv[1:]) or "Thủ đô Việt Nam là gì?"
     t0 = time.monotonic()

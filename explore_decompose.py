@@ -12,9 +12,9 @@ import re
 import time
 from pathlib import Path
 
-import pipeline
+import llm
 
-pipeline.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+llm.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
 
 QUESTIONS = [
     ("multi-hop (case đã biết sai)", "Thủ đô của nước láng giềng phía bắc Việt Nam là gì?"),
@@ -42,11 +42,11 @@ def parse_steps(raw: str) -> list[str] | None:
 
 
 if __name__ == "__main__":
-    pipeline.ensure_server()
+    llm.ensure_server()
     tally = {"valid_json": 0, "invalid": 0}
     for kind, q in QUESTIONS:
         t0 = time.monotonic()
-        result = pipeline.run_model(q, mode="decompose", temperature=0.0, n_predict=150)
+        result = llm.run_model(q, mode="decompose", temperature=0.0, n_predict=150)
         elapsed = time.monotonic() - t0
         steps = parse_steps(result["answer"])
         tally["valid_json" if steps is not None else "invalid"] += 1

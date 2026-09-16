@@ -4,10 +4,10 @@ hoạt động như một công cụ search hơn là một model đang suy luậ
 """
 from pathlib import Path
 
-import pipeline
+import llm
 from score import score_answer
 
-pipeline.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+llm.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
 
 QUESTIONS = [
     ("câu hỏi đầy đủ", "Chiều cao núi Everest là bao nhiêu?"),
@@ -28,7 +28,7 @@ if __name__ == "__main__":
         print(f"\n{'=' * 10} mode={mode} {'=' * 10}")
         counts = {}
         for kind, q in QUESTIONS:
-            out = pipeline.answer_question(q, mode=mode)
+            out = llm.answer_question(q, mode=mode)
             verdict = score_answer(q, out["answer"], out["snippets"])["verdict"]
             counts[verdict] = counts.get(verdict, 0) + 1
             print(f"[{kind}] {q}")

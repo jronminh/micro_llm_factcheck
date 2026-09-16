@@ -3,7 +3,7 @@ ngắn (tên nước/thành phố/người) thay vì 1 câu trả lời fact-che
 
 Lý do fork thay vì thêm tham số mode vào adaptive.py: yêu cầu ở đây hẹp hơn
 hẳn (đúng 1 tên riêng, không phải câu/cụm bất kỳ) - dùng prompt riêng
-(`extract_entity`, xem pipeline.py) để chặn thói quen model hay nhắc lại
+(`extract_entity`, xem llm.py) để chặn thói quen model hay nhắc lại
 tiêu đề/phần dẫn của snippet trước khi vào nội dung thật (xem README case
 "cà phê": extract_unconditional + cắt n_predict ngắn không sửa được việc
 này, chỉ cắt cụt giữa chừng phần lan man).
@@ -23,7 +23,7 @@ from pathlib import Path
 import requests
 
 from adaptive import _best_cluster_result, _cache_key
-from pipeline import N_PARALLEL, build_user_prompt, run_model
+from llm import N_PARALLEL, build_user_prompt, run_model
 from score import score_answer
 from search import search
 
@@ -178,9 +178,9 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path as _Path
 
-    import pipeline
+    import llm
 
-    pipeline.MODEL_PATH = _Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+    llm.MODEL_PATH = _Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
 
     q = " ".join(sys.argv[1:]) or "nước sản xuất nhiều cà phê nhất thế giới"
     t0 = time.monotonic()

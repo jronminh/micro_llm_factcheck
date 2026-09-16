@@ -85,12 +85,12 @@ buộc qua prompt.
 bash scripts/setup.sh              # cài llama-cpp, pip deps, tải model (idempotent, có checksum)
 llama-bench -m models/qwen2.5-1.5b-instruct-q4_k_m.gguf   # baseline tok/s thô, không qua search
 python search.py "câu hỏi"         # test riêng phần search
-python pipeline.py "câu hỏi"       # search + model, in câu trả lời
+python llm.py "câu hỏi"       # search + model, in câu trả lời
 python benchmark.py "câu hỏi"      # như trên, kèm đo thời gian, ghi vào benchmark/results.csv
 ```
 
 Model: `Qwen/Qwen2.5-1.5B-Instruct-GGUF`, bản `q4_k_m` (~1.1GB). Chạy qua
-`llama-server` (HTTP, OpenAI-compatible, CPU only) — `pipeline.py` tự khởi
+`llama-server` (HTTP, OpenAI-compatible, CPU only) — `llm.py` tự khởi
 động server nếu chưa chạy và giữ nó chạy warm giữa các lần gọi tiếp theo.
 Search: DuckDuckGo HTML endpoint, không cần API key.
 
@@ -364,7 +364,7 @@ nhãn".
 ## Chain: search+extract theo từng câu hỏi con (chain.py)
 
 Nối `decompose.py` vào cơ chế đồng thuận per-link (`adaptive.py`) - `chain.py`
-(độc lập, chưa nối vào `pipeline.py` chính). Câu hỏi loại bridge (có `{X}`)
+(độc lập, chưa nối vào `llm.py` chính). Câu hỏi loại bridge (có `{X}`)
 thì chain tuần tự: search+extract câu hỏi con đầu, điền answer vào `{X}` của
 câu hỏi con sau, search+extract tiếp. Loại comparison thì chạy 2 câu hỏi con
 song song, không phụ thuộc nhau. **Chưa có bước tổng hợp câu trả lời cuối cho
@@ -379,7 +379,7 @@ query bước 2 vỡ vụn. Vá bằng 2 việc:
    bước trước `confident=True` (đồng thuận đã đạt ngưỡng) - không tự bịa rule
    mới, dùng thẳng tín hiệu `adaptive.py` đã có sẵn.
 2. **`adaptive_entity.py`** - fork riêng của `adaptive.py`, dùng prompt mới
-   `extract_entity` (pipeline.py) ép trả lời đúng 1 tên riêng thay vì 1
+   `extract_entity` (llm.py) ép trả lời đúng 1 tên riêng thay vì 1
    câu/cụm bất kỳ. Lý do fork: bridge entity luôn là tên ngắn (nước/thành
    phố/người), còn `extract_unconditional` gốc để model tự do trích "câu/cụm
    phù hợp" nên hay lan man nhắc lại tiêu đề snippet trước khi vào nội dung -
@@ -475,7 +475,7 @@ test này pass, bật đúng `dotprod`+`i8mm`. Verify lại bằng `ctypes`:
 | Bản `pkg install` (generic) | 71.91 | 39.75 |
 | Bản build từ source (dotprod+i8mm) | 90.75 (+26%) | 46.70 (+17%) |
 
-`pipeline.py` trỏ thẳng `LLAMA_SERVER_BIN` sang binary build mới
+`llm.py` trỏ thẳng `LLAMA_SERVER_BIN` sang binary build mới
 (`~/vendor/llama.cpp/build/bin/llama-server`, nằm ngoài repo và ngoài
 `$PREFIX` của Termux) thay vì bản trên `PATH` - không đè lên gói do `pkg`
 quản lý, dễ rollback (đổi lại hằng số là xong) nếu `pkg upgrade` sau này
@@ -498,7 +498,7 @@ vs 0.5B; tiếng Anh vs tiếng Việt; 8 dạng câu hỏi khác nhau ở 2 mod
 hỏi khó hơn; khảo sát phân rã câu hỏi multi-hop trước khi search (4 cách,
 chốt ở quy tắc thuần regex+POS); nối vào `chain.py` (search+extract theo
 từng câu hỏi con, có cổng confidence + fork `adaptive_entity.py` cho bridge
-entity, xem 2 mục trên) - chạy được, chưa nối vào pipeline chính, chưa có
+entity, xem 2 mục trên) - chạy được, chưa nối vào `llm.py` chính, chưa có
 bước tổng hợp câu trả lời cuối; build lại `llama-server` từ source để bật
 `dotprod`/`i8mm` bị bản `pkg install` bỏ phí (+17-26% t/s, xem mục trên).
 
@@ -513,7 +513,7 @@ nguồn/lần sinh chỉ khử được lỗi ngẫu nhiên, không khử đư�
 lặp lại giống nhau giữa các nguồn** - "confident" không đồng nghĩa "đúng"
 ở các câu multi-hop hoặc dùng kiến thức có thể lỗi thời.
 
-Bước tiếp theo hợp lý: nối `chain.py` vào `pipeline.py` chính (câu hỏi tách
+Bước tiếp theo hợp lý: nối `chain.py` vào `llm.py` chính (câu hỏi tách
 được thì chain, không tách được thì chạy như cũ); test nhánh `_expects_number`
 (route câu hỏi số liệu về `adaptive.py` gốc) với 1 case bridge thật sự đủ
 confident ở bước 1 để đi tới bước 2 - chưa có case nào verify được nhánh này

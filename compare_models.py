@@ -7,7 +7,7 @@ model khác và khởi động lại đúng model trước khi chạy hết bộ
 import time
 from pathlib import Path
 
-import pipeline
+import llm
 
 MODELS_DIR = Path(__file__).parent / "models"
 MODELS = {
@@ -26,13 +26,13 @@ QUESTIONS = [
 
 
 def run_for_model(label: str, model_path: Path) -> list[dict]:
-    pipeline.MODEL_PATH = model_path
-    pipeline.ensure_server()
+    llm.MODEL_PATH = model_path
+    llm.ensure_server()
 
     rows = []
     for q in QUESTIONS:
         t0 = time.monotonic()
-        out = pipeline.answer_question(q)
+        out = llm.answer_question(q)
         elapsed = time.monotonic() - t0
         rows.append({
             "model": label,

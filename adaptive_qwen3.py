@@ -1,6 +1,6 @@
 """Fork của adaptive.py, dùng riêng cho model reasoning kiểu Qwen3 (dual-mode
 <think>). Thay vì 1 lần gọi extract_unconditional như adaptive.py gốc, mỗi
-link chạy qua 3 bước, mỗi bước 1 system prompt riêng (pipeline.SYSTEM_PROMPTS
+link chạy qua 3 bước, mỗi bước 1 system prompt riêng (llm.SYSTEM_PROMPTS
 "qwen3_extract"/"qwen3_critique"/"qwen3_finalize"):
 
 1. Trích xuất (bật reasoning) - đọc snippet, suy luận, đưa ra câu trả lời
@@ -56,9 +56,9 @@ from pathlib import Path
 
 import requests
 
-import pipeline
+import llm
 from adaptive import _best_cluster_result
-from pipeline import N_PARALLEL, build_user_prompt, run_model
+from llm import N_PARALLEL, build_user_prompt, run_model
 from score import score_answer
 from search import search
 
@@ -71,7 +71,7 @@ def _cache_key_qwen3(
 ) -> str:
     raw = (
         f"{question}||{n_predict_extract}||{n_predict_critique}||{n_predict_finalize}||"
-        f"{temperature}||{pipeline.MODEL_PATH}||{snippet.get('url') or snippet.get('snippet', '')}"
+        f"{temperature}||{llm.MODEL_PATH}||{snippet.get('url') or snippet.get('snippet', '')}"
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -321,7 +321,7 @@ def answer_question_qwen3_per_link(
 if __name__ == "__main__":
     import sys
 
-    pipeline.MODEL_PATH = Path(__file__).parent / "models" / "qwen3-0.6b-q4_k_m.gguf"
+    llm.MODEL_PATH = Path(__file__).parent / "models" / "qwen3-0.6b-q4_k_m.gguf"
 
     # --sequential: gui request tung link mot thay vi song song - de so sanh
     # wall-clock that voi che do song song mac dinh (xem comment o

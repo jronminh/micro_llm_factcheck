@@ -5,8 +5,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pipeline
-from pipeline import build_user_prompt, run_model
+import llm
+from llm import build_user_prompt, run_model
 from score import score_answer
 from search import search
 
@@ -31,7 +31,7 @@ def run_benchmark(question: str, n_results: int = 5, mode: str = "synth") -> dic
     row = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "question": question,
-        "model": pipeline.MODEL_PATH.name,
+        "model": llm.MODEL_PATH.name,
         "mode": mode,
         "search_s": round(t1 - t0, 2),
         "model_s": round(t2 - t1, 2),

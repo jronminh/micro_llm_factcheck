@@ -62,7 +62,7 @@ def max_temp_c(zones: list[Path]) -> float | None:
 
 def kill_llama_server() -> None:
     # ps aux tu parse, khong dung pkill/pgrep - tren may nay 2 lenh do khong
-    # khop duoc process du ps aux thay ro no (xem pipeline._llama_server_pids).
+    # khop duoc process du ps aux thay ro no (xem llm._llama_server_pids).
     out = subprocess.run(["ps", "aux"], capture_output=True, text=True, check=False).stdout
     for line in out.splitlines():
         parts = line.split()

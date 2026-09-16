@@ -6,10 +6,10 @@ Termux foreground (không còn bị OneUI throttle).
 import time
 from pathlib import Path
 
-import pipeline
+import llm
 from adaptive import answer_question_per_link
 
-pipeline.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+llm.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
 
 QUESTIONS = [
     ("multi-hop", "Thủ đô của nước láng giềng phía bắc Việt Nam là gì?"),

@@ -97,9 +97,9 @@ if __name__ == "__main__":
     import time
     from pathlib import Path
 
-    import pipeline
+    import llm
 
-    pipeline.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+    llm.MODEL_PATH = Path(__file__).parent / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
 
     # 3 câu hỏi khó đã dùng để tune adaptive.py (explore_adaptive.py) mà
     # decompose.py thực sự tách được (bridge/comparison) - các câu khó khác
@@ -120,7 +120,7 @@ if __name__ == "__main__":
     # (~17 batch N_PARALLEL=3) vượt xa timeout_s=90 mặc định.
     HARD_KWARGS = {"max_n": 50, "consensus_threshold": 0.80, "timeout_s": 900, "debug": True}
 
-    pipeline.ensure_server()
+    llm.ensure_server()
     for q in QUESTIONS:
         t0 = time.monotonic()
         out = answer_chain(q, **HARD_KWARGS)
