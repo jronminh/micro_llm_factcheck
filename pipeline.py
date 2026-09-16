@@ -6,6 +6,7 @@ stdout xen với câu trả lời (và cắt ngắn phần echo khi prompt dài)
 ranh giới rõ ràng để tách câu trả lời thật ra bằng regex. llama-server trả
 JSON sạch, đồng thời giữ model warm giữa các lần gọi.
 """
+import os
 import subprocess
 import sys
 import threading
@@ -127,6 +128,44 @@ SYSTEM_PROMPTS = {
         "KHÔNG lặp lại tiêu đề đoạn trích, KHÔNG kèm số thứ tự kiểu \"[1]\", KHÔNG giải thích, "
         "KHÔNG viết thành câu. Chỉ in ra đúng cái tên đó, không gì khác."
     ),
+    # 3 prompt cho adaptive_qwen3.py - chain 3 bước độc lập tận dụng reasoning
+    # của Qwen3 (không tắt bằng /no_think như các nơi khác dùng Qwen3), thay
+    # vì 1 lần gọi extract_unconditional như adaptive.py gốc. Mỗi bước là 1
+    # request HTTP riêng (không phải multi-turn conversation) - "độc lập" theo
+    # đúng nghĩa: bước sau không thấy được quá trình suy luận (reasoning_content)
+    # của bước trước, chỉ thấy answer cuối (content) của nó, giống cách 1
+    # reviewer con người không cần đọc hết bản nháp, chỉ cần đọc bản đã chốt.
+    "qwen3_extract": (
+        "Đọc đoạn trích dưới đây và câu hỏi. Suy luận từng bước xem đoạn trích có chứa "
+        "thông tin trả lời trực tiếp câu hỏi hay không. Nếu có, trích dẫn NGUYÊN VĂN câu/cụm "
+        "chứa thông tin đó rồi nêu câu trả lời ngắn gọn. Nếu không có, nói rõ \"không có thông tin\"."
+    ),
+    # Ban dau viet "suy dien" la 1 tieu chi bac bo, khong phan biet suy luan
+    # hop ly TU thong tin co that trong doan trich (vd doan trich noi "Trung
+    # Quoc giap VN o phia Bac" + "thu do Trung Quoc la Bac Kinh" -> suy ra
+    # "Bac Kinh" la HOP LE) voi bia them noi dung KHONG he co trong doan trich
+    # - hau qua thay truc tiep: critique bac bo dung cau tra loi dung ("Bac
+    # Kinh") vi cho la "suy dien", trong khi no duoc suy tu chinh noi dung
+    # doan trich. Sua lai de phan biet ro 2 truong hop.
+    "qwen3_critique": (
+        "Bạn là người kiểm tra chất lượng độc lập, không phải người đã trả lời câu hỏi. Cho "
+        "đoạn trích gốc, câu hỏi, và một câu trả lời ứng viên - suy luận từng bước xem MỌI thông "
+        "tin trong câu trả lời có thực sự xuất hiện hoặc suy ra được trực tiếp từ nội dung đoạn "
+        "trích hay không. Suy luận hợp lý dựa trên thông tin CÓ THẬT trong đoạn trích là HỢP LỆ "
+        "(ví dụ: đoạn trích nói \"Trung Quốc giáp Việt Nam ở phía Bắc\" và \"thủ đô Trung Quốc là "
+        "Bắc Kinh\" thì suy ra \"Bắc Kinh\" là HỢP LỆ, dù đoạn trích không nói thẳng \"Bắc Kinh\" "
+        "là câu trả lời) - khác với bịa thêm thông tin KHÔNG hề xuất hiện trong đoạn trích (KHÔNG "
+        "HỢP LỆ). Kết luận CHỈ MỘT trong hai, ở dòng cuối cùng: \"HOP_LE\" nếu mọi thông tin trong "
+        "câu trả lời đều có căn cứ (trực tiếp hoặc suy luận hợp lý) trong đoạn trích, hoặc "
+        "\"KHONG_HOP_LE\" nếu câu trả lời sai hoặc đưa vào thông tin không hề xuất hiện trong "
+        "đoạn trích."
+    ),
+    "qwen3_finalize": (
+        "Cho câu hỏi, một câu trả lời ứng viên, và kết quả kiểm tra (HOP_LE hoặc KHONG_HOP_LE). "
+        "Nếu kiểm tra là HOP_LE, in ra câu trả lời ứng viên (có thể viết gọn hơn nếu dài dòng, "
+        "giữ nguyên nội dung). Nếu kiểm tra là KHONG_HOP_LE, in ra đúng câu: \"không có thông "
+        "tin\". Không giải thích gì thêm, không nhắc lại kết quả kiểm tra."
+    ),
 }
 
 
@@ -146,10 +185,34 @@ def _loaded_model_path() -> str | None:
         return None
 
 
+def _llama_server_pids() -> list[str]:
+    # `pkill`/`pgrep -x llama-server` KHÔNG khớp được process trên máy này dù
+    # `ps aux` thấy rõ nó (đã kiểm chứng trực tiếp: pkill trả exit code 1 =
+    # "không có process khớp" trong khi ps aux vẫn liệt kê nó) - lý do khiến
+    # _stop_server() từng âm thầm thất bại suốt (server cũ không hề bị dừng,
+    # ensure_server() tưởng nhầm nó vẫn dùng được). Tự parse `ps aux` lấy PID
+    # thay vì dựa vào khớp tên qua pkill/pgrep.
+    out = subprocess.run(["ps", "aux"], capture_output=True, text=True, check=False).stdout
+    return [
+        parts[1] for line in out.splitlines()
+        if len(parts := line.split()) > 10 and parts[10].endswith("/llama-server")
+    ]
+
+
+def _running_server_bin() -> str | None:
+    # Đọc /proc/<pid>/exe để biết server đang chạy dùng đúng binary nào (pkg
+    # hay tự build) - _loaded_model_path() chỉ biết model, không phân biệt
+    # được 2 binary khác nhau load cùng 1 file model.
+    pids = _llama_server_pids()
+    try:
+        return os.readlink(f"/proc/{pids[0]}/exe") if pids else None
+    except OSError:
+        return None
+
+
 def _stop_server() -> None:
-    # -x (khớp đúng tên process) thay vì -f: -f khớp cả cmdline của process
-    # gọi pkill, có thể tự kill nhầm shell đang chạy nó.
-    subprocess.run(["pkill", "-x", "llama-server"], check=False)
+    for pid in _llama_server_pids():
+        subprocess.run(["kill", "-9", pid], check=False)
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline and _server_ready():
         time.sleep(0.3)
@@ -174,9 +237,11 @@ def ensure_server(startup_timeout: float = 60) -> None:
 
         if _server_ready():
             # Server đang chạy có thể là của một lần gọi trước với model khác
-            # - phải kiểm tra khớp MODEL_PATH, không thì âm thầm benchmark
-            # nhầm model.
-            if _loaded_model_path() == str(MODEL_PATH):
+            # hoặc binary khác (vd so sánh pkg vs build từ source) - phải
+            # kiểm tra khớp cả MODEL_PATH lẫn LLAMA_SERVER_BIN, không thì âm
+            # thầm tái sử dụng nhầm process cũ (đã thấy bug này: benchmark
+            # "pkg" nhưng thực ra vẫn đang đo binary build từ source).
+            if _loaded_model_path() == str(MODEL_PATH) and _running_server_bin() == str(LLAMA_SERVER_BIN):
                 return
             _stop_server()
 
@@ -228,8 +293,20 @@ def run_model(
     resp.raise_for_status()
     data = resp.json()
     timings = data.get("timings", {})
+    choice = data["choices"][0]
+    message = choice["message"]
+    # finish_reason/completion_tokens/reasoning_content: dùng để debug các
+    # chain nhiều bước với model reasoning (Qwen3, xem adaptive_qwen3.py) -
+    # finish_reason="length" nghĩa là model bị cắt cụt bởi n_predict trước
+    # khi tự dừng (có thể vẫn đang ở giữa <think>, content rỗng dù model
+    # "làm việc" thật) khác với "stop" (tự kết luận xong). reasoning_content
+    # chỉ có ở model dual-mode reasoning không dùng /no_think - completion_tokens
+    # tính GỘP cả reasoning_content lẫn content, không tách riêng được từ API.
     return {
-        "answer": data["choices"][0]["message"]["content"].strip(),
+        "answer": message["content"].strip(),
+        "reasoning": message.get("reasoning_content"),
+        "finish_reason": choice.get("finish_reason"),
+        "completion_tokens": data.get("usage", {}).get("completion_tokens"),
         "prompt_tps": timings.get("prompt_per_second"),
         "gen_tps": timings.get("predicted_per_second"),
     }

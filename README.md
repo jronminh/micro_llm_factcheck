@@ -5,6 +5,20 @@ một search engine. Python đóng vai trò điều phối và giới hạn mode
 search rồi tổng hợp kết quả, không được tự trả lời từ kiến thức nền hoặc suy
 luận ngoài nội dung search được.
 
+File này là nhật ký tiến độ dự án (theo commit). Nghiên cứu nền/tham khảo
+sâu hơn về từng chủ đề kỹ thuật cụ thể (không phải kết quả thực nghiệm của
+dự án) nằm ở `notes/` - xem `notes/android-thermal-apis.md` (2 lớp API
+nhiệt Android, ý nghĩa từng loại cảm biến), `notes/android-background-app-throttling.md`
+(Android hạ xung app chạy nền, dễ tưởng nhầm RAM/nhiệt),
+`notes/llamacpp-hardware-acceleration-android.md` (CPU dotprod/i8mm, GPU
+OpenCL, NPU Hexagon - cái nào đáng làm), `notes/multi-hop-question-decomposition.md`
+(vì sao chọn regex+POS thay vì LLM để tách câu hỏi),
+`notes/termux-pgrep-pkill-exact-match-quirk.md` (vì sao `pkill -x` không
+dùng được trên máy này), `notes/micro-llm-alternatives-to-qwen.md`
+(khảo sát model nhỏ khác ngoài Qwen2.5, tháng 9/2026), và
+`notes/qwen3-reasoning-chain-adaptive.md` (thí nghiệm chain 3 bước tận dụng
+reasoning của Qwen3 - chưa hoàn thiện, xem trạng thái trong note).
+
 ## Vấn đề đang giải quyết
 
 Model nhỏ hay bị hallucination khi trả lời trực tiếp từ tri thức nội tại vì

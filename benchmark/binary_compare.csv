@@ -1,0 +1,8 @@
+binary,question,total_s,gen_tps,answer_preview
+pkg,Chieu cao nui Everest la bao nhieu?,44.91,8.24334782081859,"Câu hỏi: Độ cao của đỉnh Everest là bao nhiêu?  Đoạn trích 3 cung cấp thông tin chính xác nhất:  ""[3] Chiều cao thực sự "
+pkg,Ai la tong thong My hien tai?,21.8,9.882943592393522,"Theo thông tin trong các đoạn trích, tổng thống Hoa Kỳ hiện tại là Donald Trump."
+pkg,Python la ngon ngu lap trinh gi?,25.44,7.935511556648259,"Python là ngôn ngữ lập trình máy tính bậc cao thường được sử dụng để xây dựng trang web và phần mềm, tự động hóa các tác"
+source,Chieu cao nui Everest la bao nhieu?,12.77,11.997085339687999,Chieu cao nui Everest la 8.848.86m.
+source,Ai la tong thong My hien tai?,9.8,11.978825791936506,Tổng thống Mỹ hiện tại là Donald Trump.
+source,Python la ngon ngu lap trinh gi?,10.93,12.105009225746318,"Python là một ngôn ngữ lập trình hướng đối tượng, mạnh mẽ và mạnh mẽ với kiểu dữ liệu."
+pkg,Thủ đô nước láng giềng phía Bắc Việt Nam là gì?,28.62,7.811019514643624,Thủ đô nước láng giềng phía Bắc Việt Nam là Bắc Kinh (Phnom Penh).

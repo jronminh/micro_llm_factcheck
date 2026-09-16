@@ -13,6 +13,9 @@ MODELS_DIR = Path(__file__).parent / "models"
 MODELS = {
     "1.5B": MODELS_DIR / "qwen2.5-1.5b-instruct-q4_k_m.gguf",
     "0.5B": MODELS_DIR / "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    # Khảo sát model khác ngoài Qwen2.5, xem notes/micro-llm-alternatives-to-qwen.md.
+    "qwen3-0.6b": MODELS_DIR / "qwen3-0.6b-q4_k_m.gguf",
+    "gemma3-270m": MODELS_DIR / "gemma-3-270m-it-q4_k_m.gguf",
 }
 
 QUESTIONS = [

@@ -4,3 +4,7 @@ __pycache__/
 .server.log
 .link_cache.json
 .link_cache_entity.json
+.link_cache_qwen3.json
+# log tam khi debug qua guarded_run.py/tee (vd .adaptive_qwen3_hard3.log) -
+# khong phai ket qua chinh thuc, ket qua that nam trong notes/ hoac commit msg.
+.*.log

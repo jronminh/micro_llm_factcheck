@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 
 import requests
 
+import pipeline
 from pipeline import N_PARALLEL, build_user_prompt, run_model
 from score import score_answer
 from search import search
@@ -44,7 +45,16 @@ def _cache_key(question: str, snippet: dict, n_predict: int, temperature: float)
     # n_predict/temperature ảnh hưởng trực tiếp đến answer sinh ra - phải nằm
     # trong key, nếu không đổi tham số này sẽ âm thầm trả về answer cache từ
     # lần tune trước với n_predict/temperature khác.
-    raw = f"{question}||{n_predict}||{temperature}||{snippet.get('url') or snippet.get('snippet', '')}"
+    #
+    # MODEL_PATH cũng phải nằm trong key - phát hiện được khi so sánh
+    # Qwen3-0.6B với Qwen2.5-0.5B (explore_qwen3.py): thiếu MODEL_PATH khiến
+    # 4/8 câu hỏi âm thầm trả về answer cache từ lần chạy Qwen2.5 trước đó
+    # thay vì thực sự gọi Qwen3 - kết quả so sánh sai mà không có dấu hiệu
+    # lỗi nào (answer vẫn "hợp lệ", chỉ là của model khác).
+    raw = (
+        f"{question}||{n_predict}||{temperature}||{pipeline.MODEL_PATH}||"
+        f"{snippet.get('url') or snippet.get('snippet', '')}"
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
