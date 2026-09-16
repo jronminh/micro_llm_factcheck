@@ -82,15 +82,41 @@ SYSTEM_PROMPTS = {
     # case answer bám đúng chủ đề nhưng lệch sự kiện con (vd "Eiffel cao thêm
     # 15cm mùa hè" khi hỏi tổng chiều cao) - điều mà so từ khóa thô không bắt
     # được vì 2 câu chia sẻ phần lớn từ vựng, chỉ khác phần vị ngữ/giá trị.
+    # v2: bản đầu chỉ có 1 ví dụ, luôn là trả lời thành công - không dạy model
+    # cách từ chối, nên khi đoạn trích không có dữ liệu, model vẫn bịa ra một
+    # câu đúng khuôn thay vì từ chối (xem case Giza "330 mét" chép nguyên giá
+    # trị trong ví dụ, hoặc tác giả "QuanTriMang" chép tên trang web - README/
+    # memory numeric_clustering_after_normalization). Sửa bằng 2 ví dụ tương
+    # phản (không phải mô tả quy tắc trừu tượng "nếu... thì..." - model 0.5B
+    # đã chứng minh kém với quy tắc điều kiện, xem lịch sử mode "decompose"
+    # bên dưới) để model bắt chước cả pattern trả lời lẫn pattern từ chối.
     "extract_claim": (
-        "Bạn là một công cụ tìm kiếm, không phải trợ lý hội thoại. Nhiệm vụ duy nhất: "
-        "đọc đoạn trích dưới đây, tìm sự kiện cụ thể trả lời trực tiếp yêu cầu, rồi viết "
-        "lại thành ĐÚNG MỘT câu khẳng định ngắn, đủ chủ ngữ - vị ngữ - giá trị, dùng đúng "
-        "từ ngữ trong đoạn trích. Không thêm giải thích, không thêm câu thứ hai.\n\n"
-        "Ví dụ - Đoạn trích: \"[1] Tháp Eiffel - Wikipedia: Tháp Eiffel là công trình bằng "
+        "Bạn là một công cụ tìm kiếm, không phải trợ lý hội thoại. Đọc đoạn trích dưới đây, "
+        "viết lại yêu cầu thành ĐÚNG MỘT câu khẳng định ngắn, thay phần cần tìm bằng giá trị "
+        "lấy đúng từ đoạn trích. Nếu đoạn trích KHÔNG nêu sự kiện này, trả lời đúng "
+        "\"Không có thông tin.\" - không đoán, không bịa số liệu hay tên riêng. Không thêm "
+        "giải thích, không thêm câu thứ hai.\n\n"
+        "Ví dụ 1 - Đoạn trích: \"[1] Tháp Eiffel - Wikipedia: Tháp Eiffel là công trình bằng "
         "thép cao 330 mét kể cả ăng-ten, hoàn thành năm 1889.\"\n"
         "Yêu cầu: Tháp Eiffel cao bao nhiêu mét?\n"
-        "Trả lời: Tháp Eiffel cao 330 mét."
+        "Trả lời: Tháp Eiffel cao 330 mét.\n\n"
+        "Ví dụ 2 - Đoạn trích: \"[1] Đại Kim tự tháp Giza - Wikipedia: Quần thể di tích cổ "
+        "nằm ở sa mạc phía Tây, cách trung tâm Cairo khoảng 13 km.\"\n"
+        "Yêu cầu: Kim tự tháp Giza cao bao nhiêu mét?\n"
+        "Trả lời: Không có thông tin."
+    ),
+    # Thử nghiệm v3 (KHÔNG lấy câu hỏi làm khuôn) - so với extract_claim: bỏ
+    # hẳn khung "yêu cầu/trả lời", chỉ bảo tóm tắt ĐOẠN TRÍCH. Giả thuyết: khi
+    # đoạn trích không nói về thuộc tính cần (vd chiều cao), bản tóm tắt tự
+    # nhiên lệch chủ đề (vd nói về vị trí địa lý) - _claim_match (adaptive.py)
+    # tự bắt được lệch khung câu này mà không cần dạy model "cách từ chối".
+    "extract_summary": (
+        "Bạn là một công cụ tìm kiếm, không phải trợ lý hội thoại. Đọc đoạn trích dưới đây, "
+        "tóm tắt lại thành ĐÚNG MỘT câu ngắn nhất có thể, giữ nguyên số liệu/tên riêng quan "
+        "trọng, dùng đúng từ ngữ trong đoạn trích. Không thêm giải thích, không thêm câu thứ hai.\n\n"
+        "Ví dụ - Đoạn trích: \"[1] Tháp Eiffel - Wikipedia: Tháp Eiffel là công trình bằng "
+        "thép cao 330 mét kể cả ăng-ten, hoàn thành năm 1889.\"\n"
+        "Tóm tắt: Tháp Eiffel cao 330 mét kể cả ăng-ten, hoàn thành năm 1889."
     ),
     # Khảo sát v1: chỉ mô tả quy tắc trừu tượng ("nếu multi-hop thì tách"), bắt
     # model tự suy luận khi nào áp dụng - kết quả rất tệ (xem README): bỏ sót

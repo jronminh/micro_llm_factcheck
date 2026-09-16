@@ -96,28 +96,49 @@ def _cluster(texts: list[str], sim_threshold: float) -> list[list[int]]:
     return clusters
 
 
-_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
+_NUMBER_RE = re.compile(r"\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?")
+_SCALE_WORDS = (("tỷ", 1e9), ("ty", 1e9), ("triệu", 1e6), ("vạn", 1e4), ("nghìn", 1e3), ("ngàn", 1e3))
 
 
 def _extract_number(text: str) -> float | None:
-    """Lấy số đầu tiên trong text, chuẩn hóa kiểu Việt Nam: dấu phẩy luôn là
-    thập phân ("33,5" -> 33.5); dấu chấm là phân cách nghìn CHỈ khi theo sau
-    đúng 3 chữ số ("15.000" -> 15000), ngược lại coi là thập phân.
+    """Lấy số đầu tiên trong text, chuẩn hóa kiểu Việt Nam:
+    - dấu chấm lặp lại thành nhóm 3 chữ số ("123.753.041") -> phân cách
+      nghìn, kể cả nhiều nhóm liên tiếp (bug cũ chỉ bắt được 1 nhóm đầu,
+      cắt cụt "123.753.041 người" ~123 triệu thành 123753 - sai ~1000 lần).
+    - dấu phẩy luôn là thập phân ("33,5" -> 33.5, "14,7 triệu" -> 14.7 rồi
+      nhân theo đơn vị chữ bên dưới).
+    - 1 nhóm chấm không đủ 3 chữ số sau -> coi là thập phân kiểu Anh
+      ("138.5" -> 138.5), giữ đúng 3 chữ số -> coi là phân cách nghìn
+      ("15.000" -> 15000), khớp hành vi cũ cho trường hợp 1 nhóm.
+    - đơn vị chữ ngay sau số ("triệu", "tỷ", "nghìn"...) được nhân vào giá
+      trị - thiếu bước này thì "120 triệu" và "123.753.041" (cùng ~120
+      triệu thật) bị coi là 2 giá trị khác xa nhau, không cluster được.
     """
     m = _NUMBER_RE.search(text)
     if not m:
         return None
     raw = m.group()
-    if "," in raw:
-        raw = raw.replace(".", "").replace(",", ".")
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+(?:,\d+)?", raw):
+        intpart, _, fracpart = raw.partition(",")
+        value = float(intpart.replace(".", ""))
+        if fracpart:
+            value += float(f"0.{fracpart}")
+    elif "," in raw:
+        value = float(raw.replace(".", "").replace(",", "."))
     elif "." in raw:
         intp, frac = raw.split(".")
-        if len(frac) == 3:
-            raw = intp + frac
-    try:
-        return float(raw)
-    except ValueError:
-        return None
+        value = float(intp + frac) if len(frac) == 3 else float(raw)
+    else:
+        try:
+            value = float(raw)
+        except ValueError:
+            return None
+    tail = text[m.end():m.end() + 12].strip().lower()
+    for word, mult in _SCALE_WORDS:
+        if tail.startswith(word):
+            value *= mult
+            break
+    return value
 
 
 def _cluster_answers(texts: list[str], sim_threshold: float, numeric_tol: float = 1e-6) -> list[list[int]]:
@@ -170,11 +191,15 @@ def _best_cluster_result(
     question: str, answers: list[tuple[str, str]], snippets: list[dict],
     cluster_sim_threshold: float, content_sim_threshold: float,
 ) -> dict | None:
-    # Mẫu degenerate ("[2]", rỗng...) không tham gia cluster - nếu không,
-    # nhiều lần degenerate giống hệt nhau có thể thắng đồng thuận dù không có
-    # nội dung thật. snippets phải lọc song song với answers để giữ đúng chỉ
-    # số khi tính domain của cluster thắng (bias).
-    usable = [(a, v, s) for (a, v), s in zip(answers, snippets) if v != "degenerate"]
+    # Mẫu degenerate ("[2]", rỗng...) và off_topic (claim_match thấp - đúng
+    # chủ đề nhưng lệch sự kiện so với câu hỏi, xem _process_link) không
+    # tham gia cluster - nếu không, nhiều lần degenerate giống hệt nhau có
+    # thể thắng đồng thuận dù không có nội dung thật, hoặc off_topic (vốn
+    # được đánh dấu chính là để loại khỏi đồng thuận) vẫn lọt vào vote như
+    # bình thường, vô hiệu hóa mục đích của claim_match. snippets phải lọc
+    # song song với answers để giữ đúng chỉ số khi tính domain của cluster
+    # thắng (bias).
+    usable = [(a, v, s) for (a, v), s in zip(answers, snippets) if v not in ("degenerate", "off_topic")]
     if not usable:
         return None
     texts = [a for a, _, _ in usable]
