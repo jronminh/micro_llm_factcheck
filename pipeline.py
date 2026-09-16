@@ -71,6 +71,27 @@ SYSTEM_PROMPTS = {
         "xác từng chữ, không viết lại, không thêm từ nối, không giải thích) trả lời "
         "trực tiếp yêu cầu. Chỉ in ra đúng đoạn đó, không gì khác."
     ),
+    # Thử nghiệm: thay vì copy nguyên văn 1 mảnh trích (độ dài/hình dạng khác
+    # nhau tùy đoạn - "324 mét" ngắn gọn vs "Tháp Eiffel sở hữu cấu trúc mạng
+    # lưới sắt độc đáo, cao khoảng 324 mét..." dài dòng - làm cluster hóa theo
+    # câu (SequenceMatcher) không nhận ra chúng cùng giá trị), ép model viết
+    # lại thành 1 câu khẳng định ngắn, chuẩn hóa (chủ ngữ-vị ngữ-giá trị).
+    # Hai lợi ích: (1) các answer cùng giá trị nay có hình dạng câu giống nhau
+    # hơn, cluster hóa theo chuỗi đáng tin hơn; (2) so được "khung câu" của
+    # answer với "khung câu" của câu hỏi (xem adaptive._claim_match) để bắt
+    # case answer bám đúng chủ đề nhưng lệch sự kiện con (vd "Eiffel cao thêm
+    # 15cm mùa hè" khi hỏi tổng chiều cao) - điều mà so từ khóa thô không bắt
+    # được vì 2 câu chia sẻ phần lớn từ vựng, chỉ khác phần vị ngữ/giá trị.
+    "extract_claim": (
+        "Bạn là một công cụ tìm kiếm, không phải trợ lý hội thoại. Nhiệm vụ duy nhất: "
+        "đọc đoạn trích dưới đây, tìm sự kiện cụ thể trả lời trực tiếp yêu cầu, rồi viết "
+        "lại thành ĐÚNG MỘT câu khẳng định ngắn, đủ chủ ngữ - vị ngữ - giá trị, dùng đúng "
+        "từ ngữ trong đoạn trích. Không thêm giải thích, không thêm câu thứ hai.\n\n"
+        "Ví dụ - Đoạn trích: \"[1] Tháp Eiffel - Wikipedia: Tháp Eiffel là công trình bằng "
+        "thép cao 330 mét kể cả ăng-ten, hoàn thành năm 1889.\"\n"
+        "Yêu cầu: Tháp Eiffel cao bao nhiêu mét?\n"
+        "Trả lời: Tháp Eiffel cao 330 mét."
+    ),
     # Khảo sát v1: chỉ mô tả quy tắc trừu tượng ("nếu multi-hop thì tách"), bắt
     # model tự suy luận khi nào áp dụng - kết quả rất tệ (xem README): bỏ sót
     # đúng case multi-hop cần tách nhất, sinh placeholder degenerate

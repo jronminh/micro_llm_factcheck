@@ -21,6 +21,7 @@ n_predict vừa nhanh hơn (bottleneck là gen_tps, không phải prompt_tps) v�
 """
 import hashlib
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
@@ -31,7 +32,7 @@ import requests
 
 import pipeline
 from pipeline import N_PARALLEL, build_user_prompt, run_model
-from score import score_answer
+from score import _words, score_answer
 from search import search
 
 # Cache (câu hỏi, link) -> kết quả trích xuất, sống qua các lần chạy CLI khác
@@ -39,6 +40,9 @@ from search import search
 # cần gọi lại model cho cặp đã xử lý. Không commit vào git (xem .gitignore),
 # chỉ để tune cục bộ.
 CACHE_PATH = Path(__file__).parent / ".link_cache.json"
+
+
+_MODE = "extract_claim"  # đổi mode phải đổi luôn key cache - xem lý do MODEL_PATH dưới
 
 
 def _cache_key(question: str, snippet: dict, n_predict: int, temperature: float) -> str:
@@ -51,8 +55,13 @@ def _cache_key(question: str, snippet: dict, n_predict: int, temperature: float)
     # 4/8 câu hỏi âm thầm trả về answer cache từ lần chạy Qwen2.5 trước đó
     # thay vì thực sự gọi Qwen3 - kết quả so sánh sai mà không có dấu hiệu
     # lỗi nào (answer vẫn "hợp lệ", chỉ là của model khác).
+    #
+    # _MODE cũng phải nằm trong key vì cùng lý do - đổi "extract_unconditional"
+    # sang "extract_claim" (thử nghiệm claim_match) mà thiếu _MODE trong key sẽ
+    # âm thầm trả lại answer dạng cũ (mảnh trích nguyên văn) từ cache, không
+    # phải câu khẳng định chuẩn hóa mới.
     raw = (
-        f"{question}||{n_predict}||{temperature}||{pipeline.MODEL_PATH}||"
+        f"{question}||{n_predict}||{temperature}||{pipeline.MODEL_PATH}||{_MODE}||"
         f"{snippet.get('url') or snippet.get('snippet', '')}"
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -78,6 +87,57 @@ def _cluster(texts: list[str], sim_threshold: float) -> list[list[int]]:
     reps: list[str] = []
     for i, text in enumerate(texts):
         for cluster, rep in zip(clusters, reps):
+            if SequenceMatcher(None, rep.lower().strip(), text.lower().strip()).ratio() >= sim_threshold:
+                cluster.append(i)
+                break
+        else:
+            clusters.append([i])
+            reps.append(text)
+    return clusters
+
+
+_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def _extract_number(text: str) -> float | None:
+    """Lấy số đầu tiên trong text, chuẩn hóa kiểu Việt Nam: dấu phẩy luôn là
+    thập phân ("33,5" -> 33.5); dấu chấm là phân cách nghìn CHỈ khi theo sau
+    đúng 3 chữ số ("15.000" -> 15000), ngược lại coi là thập phân.
+    """
+    m = _NUMBER_RE.search(text)
+    if not m:
+        return None
+    raw = m.group()
+    if "," in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+    elif "." in raw:
+        intp, frac = raw.split(".")
+        if len(frac) == 3:
+            raw = intp + frac
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _cluster_answers(texts: list[str], sim_threshold: float, numeric_tol: float = 1e-6) -> list[list[int]]:
+    """Như _cluster(), nhưng khi cả rep và text đều trích được số, chỉ gộp nếu
+    số bằng nhau (numeric_tol chỉ để chống sai số float khi parse, KHÔNG phải
+    dung sai đo lường - chênh 1 mét giữa 324/325/330 là khác nhau thật, không
+    phải nhiễu làm tròn) - tránh lỗi SequenceMatcher coi 2 câu cùng khung
+    "Tháp Eiffel cao X mét." là giống nhau dù X khác nhau (vd 325 vs 330 mét
+    có ratio=0.92, thừa ngưỡng 0.7 mặc định). Câu không trích được số (vd
+    verdict echo) vẫn rơi về so text như cũ.
+    """
+    clusters: list[list[int]] = []
+    reps: list[str] = []
+    for i, text in enumerate(texts):
+        num = _extract_number(text)
+        for cluster, rep in zip(clusters, reps):
+            rep_num = _extract_number(rep)
+            if num is not None and rep_num is not None:
+                if abs(num - rep_num) > numeric_tol * max(abs(num), abs(rep_num), 1.0):
+                    continue
             if SequenceMatcher(None, rep.lower().strip(), text.lower().strip()).ratio() >= sim_threshold:
                 cluster.append(i)
                 break
@@ -118,7 +178,7 @@ def _best_cluster_result(
     if not usable:
         return None
     texts = [a for a, _, _ in usable]
-    clusters = _cluster(texts, cluster_sim_threshold)
+    clusters = _cluster_answers(texts, cluster_sim_threshold)
     clusters.sort(key=len, reverse=True)
     top = clusters[0]
     representative = max((usable[i][0] for i in top), key=len)
@@ -139,9 +199,53 @@ def _best_cluster_result(
     }
 
 
+def _question_relevance(question: str, snippet: dict) -> float:
+    """Tỉ lệ từ trong CÂU HỎI xuất hiện trong title+snippet - khác trục với
+    grounded_ratio (score.py), vốn đo answer bám snippet chứ không đo snippet
+    có thật sự nói về câu hỏi hay không. Bắt được trường hợp model trích xuất
+    trung thực (grounded_ratio cao) từ một snippet lạc đề (vd bài toán vật lý
+    nhắc tên "tháp Eiffel" nhưng không nói về chiều cao) - xem case Eiffel
+    trong README.
+
+    Rẻ, chạy trước khi gọi model - không tốn thêm lượt gọi nào, chỉ lọc bớt
+    số snippet đưa vào vòng trích xuất.
+    """
+    q_words = _words(question)
+    if not q_words:
+        return 1.0
+    s_words = _words(snippet.get("title", "") + " " + snippet.get("snippet", ""))
+    return len(q_words & s_words) / len(q_words)
+
+
+_QUESTION_PARTICLES = ("bao nhiêu", "là gì", "?")
+
+
+def _skeleton(text: str) -> str:
+    """Bỏ số và các cụm nghi vấn - còn lại "khung câu" (chủ ngữ-vị ngữ, không
+    giá trị) để so 2 câu khẳng định có cùng khung không, bất kể giá trị khác
+    nhau. Dùng chung cho cả question và claim để so công bằng (2 vế cùng
+    dạng khẳng định, xem pipeline.py mode "extract_claim")."""
+    t = text.lower()
+    t = re.sub(r"\d+([.,]\d+)?", "", t)
+    for p in _QUESTION_PARTICLES:
+        t = t.replace(p, "")
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _claim_match(question: str, claim: str) -> float:
+    """So khung câu của claim (câu khẳng định model viết lại) với khung câu
+    của question - dùng SequenceMatcher trên CẢ CHUỖI (không phải overlap tập
+    từ) để câu có thêm từ lạ (vd "thêm", "mùa hè" trong claim lệch sự kiện)
+    bị kéo tỉ lệ xuống, khác grounded_ratio (score.py) vốn không phạt được
+    việc này vì chỉ đo answer có bám từ vựng snippet, không đo answer có bám
+    đúng câu hỏi không."""
+    return SequenceMatcher(None, _skeleton(question), _skeleton(claim)).ratio()
+
+
 def _process_link(
     question: str, snippet: dict, n_predict: int, temperature: float, per_link_timeout_s: float,
-) -> tuple[str, str, float] | None:
+    claim_match_threshold: float,
+) -> tuple[str, str, float, float] | None:
     """Gọi model cho 1 link, chạy trong thread riêng - trả None nếu timeout/lỗi.
 
     Không đụng vào `cache` dict (đọc/ghi cache chỉ làm ở main thread, sau khi
@@ -151,7 +255,7 @@ def _process_link(
     t0 = time.monotonic()
     try:
         result = run_model(
-            user_prompt, mode="extract_unconditional", temperature=temperature,
+            user_prompt, mode=_MODE, temperature=temperature,
             n_predict=n_predict, timeout=per_link_timeout_s,
         )
     except requests.exceptions.RequestException:
@@ -159,7 +263,10 @@ def _process_link(
     elapsed = time.monotonic() - t0
     answer = result["answer"]
     verdict = score_answer(question, answer, [snippet])["verdict"]
-    return answer, verdict, elapsed
+    match = _claim_match(question, answer)
+    if verdict == "meaningful" and match < claim_match_threshold:
+        verdict = "off_topic"
+    return answer, verdict, match, elapsed
 
 
 def answer_question_per_link(
@@ -168,6 +275,8 @@ def answer_question_per_link(
     consensus_threshold: float = 0.75,
     cluster_sim_threshold: float = 0.7,
     content_sim_threshold: float = 0.5,
+    relevance_threshold: float = 0.25,
+    claim_match_threshold: float = 0.5,
     min_votes: int = 4,
     temperature: float = 0.0,
     n_predict: int = 80,
@@ -180,6 +289,15 @@ def answer_question_per_link(
     snippets = search(question, n=max_n)
     if debug:
         print(f"[debug] search: {len(snippets)} link cho {question!r}", flush=True)
+
+    scored = [(s, _question_relevance(question, s)) for s in snippets]
+    if debug:
+        for s, rel in scored:
+            tag = "giữ" if rel >= relevance_threshold else "LỌC"
+            print(f"[debug] relevance={rel:.2f} [{tag}] {s.get('title', '')[:60]!r}", flush=True)
+    snippets = [s for s, rel in scored if rel >= relevance_threshold]
+    if debug:
+        print(f"[debug] còn {len(snippets)}/{len(scored)} link sau lọc relevance >= {relevance_threshold}", flush=True)
 
     cache = _load_cache() if use_cache else {}
     answers: list[tuple[str, str]] = []
@@ -203,15 +321,22 @@ def answer_question_per_link(
                 answers.append((answer, verdict))
                 used_snippets.append(snippet)
                 if debug:
-                    print(f"[debug] link {idx}/{len(snippets)} (cache) verdict={verdict}: {answer[:80]!r}", flush=True)
+                    match = cached.get("match")
+                    print(
+                        f"[debug] link {idx}/{len(snippets)} (cache) verdict={verdict} "
+                        f"match={match}: {answer[:80]!r}",
+                        flush=True,
+                    )
             else:
                 to_run.append((idx, snippet, key))
 
         if to_run:
             with ThreadPoolExecutor(max_workers=len(to_run)) as executor:
                 futures = {
-                    executor.submit(_process_link, question, snippet, n_predict, temperature, per_link_timeout_s):
-                        (idx, snippet, key)
+                    executor.submit(
+                        _process_link, question, snippet, n_predict, temperature, per_link_timeout_s,
+                        claim_match_threshold,
+                    ): (idx, snippet, key)
                     for idx, snippet, key in to_run
                 }
                 for future in as_completed(futures):
@@ -221,16 +346,16 @@ def answer_question_per_link(
                         if debug:
                             print(f"[debug] link {idx}/{len(snippets)} bỏ qua (timeout/lỗi)", flush=True)
                         continue
-                    answer, verdict, elapsed = result
+                    answer, verdict, match, elapsed = result
                     if use_cache:
-                        cache[key] = {"answer": answer, "verdict": verdict}
+                        cache[key] = {"answer": answer, "verdict": verdict, "match": round(match, 2)}
                     answers.append((answer, verdict))
                     used_snippets.append(snippet)
                     if debug:
                         preview = answer[:80].replace("\n", " ")
                         print(
                             f"[debug] link {idx}/{len(snippets)} ({elapsed:.1f}s) verdict={verdict} "
-                            f"src={snippet.get('title', '')[:50]!r}\n         -> {preview!r}",
+                            f"match={match:.2f} src={snippet.get('title', '')[:50]!r}\n         -> {preview!r}",
                             flush=True,
                         )
             if use_cache:

@@ -25,14 +25,21 @@ def _expects_number(query: str) -> bool:
 
 
 def answer_chain(question: str, **adaptive_kwargs) -> dict:
+    debug = adaptive_kwargs.get("debug", False)
     steps = decompose(question)
+    if debug:
+        print(f"[debug][chain] decompose({question!r}) -> {steps!r}", flush=True)
 
     if len(steps) == 1:
+        if debug:
+            print("[debug][chain] type=none (không tách được), chạy như câu hỏi thường", flush=True)
         return {"question": question, "type": "none", "steps": [
             {"query": question, "result": answer_question_per_link(question, **adaptive_kwargs)},
         ]}
 
     if "{X}" in steps[1]:
+        if debug:
+            print(f"[debug][chain] type=bridge, bước 1: {steps[0]!r} (answer_entity_per_link)", flush=True)
         # Bridge entity luôn là 1 tên riêng ngắn (tên nước/thành phố/người),
         # khác với câu trả lời fact-check nói chung mà adaptive.py vốn được
         # tune cho - dùng adaptive_entity.py (fork riêng, prompt "extract_entity"
@@ -48,6 +55,12 @@ def answer_chain(question: str, **adaptive_kwargs) -> dict:
         # bug đã thấy: answer thô dài dòng, agreement 0.12, vẫn bị nhét thẳng
         # vào {X} làm query bước 2 vỡ vụn.
         if not step1_result.get("confident"):
+            if debug:
+                print(
+                    f"[debug][chain] bước 1 không confident (agreement="
+                    f"{step1_result.get('agreement')}) - dừng chain, không sang bước 2",
+                    flush=True,
+                )
             return {"question": question, "type": "bridge", "steps": [
                 {"query": steps[0], "result": step1_result},
             ]}
@@ -59,6 +72,12 @@ def answer_chain(question: str, **adaptive_kwargs) -> dict:
         # vì prompt extract_entity ép trả lời 1 tên riêng - sai bản chất nếu
         # câu hỏi thật ra cần số liệu.
         step2_fn = answer_question_per_link if _expects_number(step2_query) else answer_entity_per_link
+        if debug:
+            print(
+                f"[debug][chain] bước 1 confident (agreement={step1_result.get('agreement')}), "
+                f"bước 2: {step2_query!r} ({step2_fn.__name__})",
+                flush=True,
+            )
         step2_result = step2_fn(step2_query, **adaptive_kwargs)
         return {"question": question, "type": "bridge", "steps": [
             {"query": steps[0], "result": step1_result},
@@ -66,6 +85,8 @@ def answer_chain(question: str, **adaptive_kwargs) -> dict:
         ]}
 
     # comparison - các bước độc lập, không bước nào cần answer của bước khác.
+    if debug:
+        print(f"[debug][chain] type=comparison, {len(steps)} bước độc lập: {steps!r}", flush=True)
     return {"question": question, "type": "comparison", "steps": [
         {"query": s, "result": answer_question_per_link(s, **adaptive_kwargs)} for s in steps
     ]}
